@@ -17,6 +17,21 @@ export const FeedView: React.FC = () => {
     return [...posts].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [posts]);
 
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1
+      }
+    }
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, x: -20 },
+    show: { opacity: 1, x: 0, transition: { type: "spring" as const, stiffness: 100 } }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -116,55 +131,88 @@ export const FeedView: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Explainability Grid Card */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 border-t border-white/5 pt-3 font-mono text-[8px] text-gray-500">
-                      <div>
-                        <span>Confidence:</span>
-                        <span className="text-white block mt-0.5 font-bold">{post.confidenceScore}%</span>
-                      </div>
-                      <div>
-                        <span>Novelty Index:</span>
-                        <span className="text-white block mt-0.5 font-bold">{post.noveltyScore}/100</span>
-                      </div>
-                      <div>
-                        <span>Engineering Impact:</span>
-                        <span className="text-cyber-cyan block mt-0.5 font-bold">{post.importanceScore}/100</span>
-                      </div>
-                      <div>
-                        <span>Credibility Score:</span>
-                        <span className="text-white block mt-0.5 font-bold">97%</span>
-                      </div>
-                      <div>
-                        <span>Memory Collision check:</span>
-                        <span className="text-cyber-emerald block mt-0.5 font-bold">12% (Passed)</span>
-                      </div>
-                      <div className="col-span-2 md:col-span-1">
-                        <span>Ingestion Reason:</span>
-                        <span className="text-gray-400 block mt-0.5 truncate">{post.rationale}</span>
+                    {/* Decision Explainability Scorecard with one-sentence explainers */}
+                    <div className="border-t border-white/5 pt-4 space-y-2 font-mono text-[9px] text-gray-500">
+                      <span className="text-white block font-display uppercase tracking-widest font-bold text-[8px]">Decision Explainability Scorecard</span>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="p-2 rounded bg-black/40 border border-white/5 space-y-0.5">
+                          <div className="flex justify-between font-bold">
+                            <span>Engineering Impact:</span>
+                            <span className="text-cyber-cyan">{post.importanceScore}%</span>
+                          </div>
+                          <p className="text-[7.5px] text-gray-500 leading-normal">
+                            Measures the technical architecture depth and codebase applicability.
+                          </p>
+                        </div>
+
+                        <div className="p-2 rounded bg-black/40 border border-white/5 space-y-0.5">
+                          <div className="flex justify-between font-bold">
+                            <span>Novelty Index:</span>
+                            <span className="text-cyber-cyan">{post.noveltyScore}%</span>
+                          </div>
+                          <p className="text-[7.5px] text-gray-500 leading-normal">
+                            Assesses research uniqueness against historically indexed documents.
+                          </p>
+                        </div>
+
+                        <div className="p-2 rounded bg-black/40 border border-white/5 space-y-0.5">
+                          <div className="flex justify-between font-bold">
+                            <span>Credibility Score:</span>
+                            <span className="text-white">97%</span>
+                          </div>
+                          <p className="text-[7.5px] text-gray-500 leading-normal">
+                            Evaluates authority of source streams and commit logs.
+                          </p>
+                        </div>
+
+                        <div className="p-2 rounded bg-black/40 border border-white/5 space-y-0.5">
+                          <div className="flex justify-between font-bold">
+                            <span>Memory Similarity:</span>
+                            <span className="text-cyber-emerald">12%</span>
+                          </div>
+                          <p className="text-[7.5px] text-gray-500 leading-normal">
+                            Quantifies overlap probability with our historical document indices.
+                          </p>
+                        </div>
+
+                        <div className="p-2 rounded bg-black/40 border border-white/5 space-y-0.5">
+                          <div className="flex justify-between font-bold">
+                            <span>Editorial Policy Match:</span>
+                            <span className="text-cyber-emerald">100%</span>
+                          </div>
+                          <p className="text-[7.5px] text-gray-500 leading-normal">
+                            Verifies conformity to our zero-hype, pure systems engineering criteria.
+                          </p>
+                        </div>
+
+                        <div className="p-2 rounded bg-black/40 border border-white/5 space-y-0.5">
+                          <div className="flex justify-between font-bold">
+                            <span>Publishing Confidence:</span>
+                            <span className="text-white">96%</span>
+                          </div>
+                          <p className="text-[7.5px] text-gray-500 leading-normal">
+                            Calculated joint likelihood of editorial merit and relevancy.
+                          </p>
+                        </div>
                       </div>
                     </div>
 
-                    {/* Editorial Impact Parameters */}
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 border-t border-white/5 pt-3 font-mono text-[8px] text-gray-500">
-                      <div>
-                        <span>Est. Eng Impact:</span>
-                        <span className="text-white block mt-0.5 font-bold">{post.importanceScore}/100</span>
-                      </div>
-                      <div>
-                        <span>Enterprise Relevance:</span>
-                        <span className="text-cyber-cyan block mt-0.5 font-bold">Highly Critical</span>
-                      </div>
-                      <div>
-                        <span>Open Source licensing:</span>
-                        <span className="text-white block mt-0.5 font-bold">Public Standard</span>
-                      </div>
-                      <div>
-                        <span>Production Readiness:</span>
-                        <span className="text-cyber-emerald block mt-0.5 font-bold">Production Grade</span>
-                      </div>
-                      <div>
-                        <span>Future Influence:</span>
-                        <span className="text-white block mt-0.5 font-bold">High Dependency</span>
+                    {/* Why Not This competing alternative panel */}
+                    <div className="border-t border-white/5 pt-3 font-mono text-[9px] space-y-2">
+                      <span className="text-white block font-display uppercase tracking-widest font-bold text-[8px]">Why Not This? Competing Audit</span>
+                      <div className="p-2.5 rounded border border-red-500/20 bg-red-500/5 space-y-1">
+                        <div className="flex justify-between text-[7.5px] text-red-400">
+                          <span>Rejected Competing Alternative</span>
+                          <span>Fluff / Rumor filtered</span>
+                        </div>
+                        <div className="text-white font-semibold text-[9.5px]">
+                          {post.category === 'Agentic AI' ? "Autonomous Agent Meme Redirection Engine" : "Consumer AI Gadget Launch & Funding Announcements"}
+                        </div>
+                        <p className="text-[8px] text-gray-500 leading-relaxed">
+                          {post.category === 'Agentic AI' 
+                            ? "Rejected because it is consumer marketing trends with limited technical engineering significance." 
+                            : "Rejected as consumer product fluff rather than technical systems architecture breakthrough."}
+                        </p>
                       </div>
                     </div>
 
@@ -249,7 +297,7 @@ export const FeedView: React.FC = () => {
         </div>
       )}
 
-      {/* 6. Decision Replay Side Drawer Modal */}
+      {/* 6. Decision Replay Side Drawer Modal (Aligned with DashboardOverview!) */}
       <AnimatePresence>
         {selectedPostForDrawer && (
           <div className="fixed inset-0 z-50 flex justify-end bg-black/70 backdrop-blur-sm">
@@ -262,8 +310,8 @@ export const FeedView: React.FC = () => {
               transition={{ type: "tween", duration: 0.3 }}
               className="w-full max-w-md bg-[#0b0f19] border-l border-white/10 h-full p-6 relative overflow-y-auto z-10 flex flex-col justify-between"
             >
-              <div>
-                <div className="flex justify-between items-start border-b border-white/10 pb-4 mb-5">
+              <div className="space-y-5">
+                <div className="flex justify-between items-start border-b border-white/10 pb-4 mb-2">
                   <div>
                     <h3 className="font-display text-sm font-bold text-cyber-cyan uppercase tracking-wider">
                       Decision Replay Logs
@@ -282,59 +330,161 @@ export const FeedView: React.FC = () => {
 
                 <div className="space-y-4">
                   <div>
-                    <span className="text-[8px] text-gray-500 font-mono uppercase tracking-widest font-bold">Audited Publication Headline</span>
+                    <span className="text-[8px] text-gray-500 font-mono uppercase tracking-widest font-bold">Audited Headline</span>
                     <h2 className="font-display text-xs font-bold text-white uppercase tracking-wide leading-relaxed mt-1">
                       {selectedPostForDrawer.title}
                     </h2>
                   </div>
 
-                  {/* Flow Steps */}
-                  <div className="space-y-3 relative before:absolute before:left-3 before:top-2 before:bottom-2 before:w-[1px] before:bg-cyber-cyan/20 pl-7 font-mono text-[10px]">
-                    <div className="relative">
+                  {/* Flow Steps with Staggered Visual Cascading */}
+                  <motion.div 
+                    variants={containerVariants}
+                    initial="hidden"
+                    animate="show"
+                    className="space-y-3.5 relative before:absolute before:left-3 before:top-2 before:bottom-2 before:w-[1px] before:bg-cyber-cyan/20 pl-7 font-mono text-[9.5px] text-gray-400"
+                  >
+                    <motion.div variants={itemVariants} className="relative">
+                      <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white font-bold">✓</span>
+                      <span className="text-gray-500 mr-1.5">09:00</span> <span className="text-white font-semibold">Topic Discovered</span>
+                    </motion.div>
+                    
+                    <motion.div variants={itemVariants} className="relative pl-3 border-l border-white/5 text-gray-500 text-[8px] leading-relaxed">
+                      Sourced from streams: <span className="text-cyber-cyan font-bold">OpenAI</span> • <span className="text-cyber-cyan font-bold">GitHub</span> • <span className="text-cyber-cyan font-bold">arXiv</span>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative">
                       <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Step 1:</span> Found Topic from verified stream
-                    </div>
-                    <div className="relative">
+                      <span className="text-gray-500">Credibility Analysis:</span> <strong className="text-white">97% score</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative">
                       <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Step 2:</span> Verified Source credibility (<strong className="text-white">97%</strong>)
-                    </div>
-                    <div className="relative">
+                      <span className="text-gray-500">Competitor Audit:</span> Compared against <strong className="text-white">23 competing topics</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative">
                       <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Step 3:</span> Compared with <strong className="text-white">18 prior publications</strong> in index
-                    </div>
-                    <div className="relative">
+                      <span className="text-gray-500">Memory Comparison:</span> Scanned <strong className="text-white">18 previous publications</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative pl-3 border-l border-white/5 text-gray-500 text-[8px] leading-relaxed">
+                      Duplicate similarity score: <strong className="text-cyber-emerald">12% probability</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative">
                       <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Step 4:</span> Memory collision check passed (<strong className="text-cyber-emerald">12% similarity</strong>)
-                    </div>
-                    <div className="relative">
+                      <span className="text-gray-500">Novelty Score:</span> Rated at <strong className="text-white">{selectedPostForDrawer.noveltyScore}%</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative">
                       <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Step 5:</span> Impact scored at <strong className="text-white">{selectedPostForDrawer.importanceScore}/100</strong>
-                    </div>
-                    <div className="relative">
+                      <span className="text-gray-500">Engineering Impact:</span> Scored <strong className="text-cyber-cyan">{selectedPostForDrawer.importanceScore}/100</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative">
                       <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Step 6:</span> Novelty evaluated at <strong className="text-white">{selectedPostForDrawer.noveltyScore}/100</strong>
-                    </div>
-                    <div className="relative font-bold">
-                      <span className="absolute -left-[27px] top-1.5 w-2.5 h-2.5 rounded-full bg-cyber-cyan border border-cyber-cyan flex items-center justify-center text-[6px] text-black">✓</span>
-                      <span className="text-cyber-cyan">Step 7:</span> Editorial Decision: <strong className="text-cyber-cyan">PUBLISH</strong>
-                    </div>
-                    <div className="relative text-cyber-purple font-bold">
-                      <span className="absolute -left-[27px] top-1.5 w-2.5 h-2.5 rounded-full bg-cyber-purple border border-cyber-purple flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span>Step 8:</span> Knowledge Vector Graph updated: <strong className="text-cyber-purple">YES</strong>
+                      <span className="text-gray-500">Editorial Policy:</span> <strong className="text-cyber-emerald">PASS (Pure Tech)</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative">
+                      <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
+                      <span className="text-gray-500">Publishing Confidence:</span> <strong className="text-white">96% score</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative font-bold text-cyber-cyan">
+                      <span className="absolute -left-[27px] top-1.5 w-2.5 h-2.5 rounded-full bg-cyber-cyan border border-cyber-cyan flex items-center justify-center text-[6px] text-black font-bold">✓</span>
+                      Final Decision: <strong className="text-cyber-cyan">APPROVED</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative text-cyber-purple font-bold">
+                      <span className="absolute -left-[27px] top-1.5 w-2.5 h-2.5 rounded-full bg-cyber-purple border border-cyber-purple flex items-center justify-center text-[6px] text-white font-bold">✓</span>
+                      Knowledge Graph Updated: YES
+                    </motion.div>
+                  </motion.div>
+
+                  {/* Detailed Scorecard Explainability */}
+                  <div className="border-t border-white/10 pt-4 space-y-3 font-mono text-[9px]">
+                    <span className="text-white block font-display uppercase tracking-widest font-bold">Decision Explainability Scorecard</span>
+                    
+                    <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
+                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
+                        <div className="flex justify-between font-bold">
+                          <span>Engineering Impact:</span>
+                          <span className="text-cyber-cyan">{selectedPostForDrawer.importanceScore}%</span>
+                        </div>
+                        <p className="text-[8px] text-gray-500 leading-normal">
+                          Measures the technical architecture depth and practical codebase applicability.
+                        </p>
+                      </div>
+
+                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
+                        <div className="flex justify-between font-bold">
+                          <span>Novelty Index:</span>
+                          <span className="text-cyber-cyan">{selectedPostForDrawer.noveltyScore}%</span>
+                        </div>
+                        <p className="text-[8px] text-gray-500 leading-normal">
+                          Assesses the uniqueness of this research against all previously indexed publications.
+                        </p>
+                      </div>
+
+                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
+                        <div className="flex justify-between font-bold">
+                          <span>Credibility Score:</span>
+                          <span className="text-white">97%</span>
+                        </div>
+                        <p className="text-[8px] text-gray-500 leading-normal">
+                          Evaluates the authority of source streams and commit integrity logs.
+                        </p>
+                      </div>
+
+                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
+                        <div className="flex justify-between font-bold">
+                          <span>Memory Similarity:</span>
+                          <span className="text-cyber-emerald">12%</span>
+                        </div>
+                        <p className="text-[8px] text-gray-500 leading-normal">
+                          Quantifies overlap probability with our historical document indices.
+                        </p>
+                      </div>
+
+                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
+                        <div className="flex justify-between font-bold">
+                          <span>Editorial Policy Match:</span>
+                          <span className="text-cyber-emerald">100%</span>
+                        </div>
+                        <p className="text-[8px] text-gray-500 leading-normal">
+                          Verifies conformity to our zero-hype, pure systems engineering criteria.
+                        </p>
+                      </div>
+
+                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
+                        <div className="flex justify-between font-bold">
+                          <span>Publishing Confidence:</span>
+                          <span className="text-white">96%</span>
+                        </div>
+                        <p className="text-[8px] text-gray-500 leading-normal">
+                          Calculated joint likelihood of editorial merit and audience relevancy.
+                        </p>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Summary parameters */}
-                  <div className="p-3.5 rounded bg-black/40 border border-white/5 text-[9px] font-mono space-y-1.5">
-                    <span className="text-white block font-display uppercase tracking-widest font-bold">Explainability Telemetry</span>
-                    <div className="flex justify-between"><span>Confidence:</span><span className="text-white">93%</span></div>
-                    <div className="flex justify-between"><span>Novelty:</span><span className="text-white">{selectedPostForDrawer.noveltyScore}%</span></div>
-                    <div className="flex justify-between"><span>Engineering Impact:</span><span className="text-white">{selectedPostForDrawer.importanceScore}/100</span></div>
-                    <div className="flex justify-between"><span>Credibility:</span><span className="text-white">97%</span></div>
-                    <div className="flex justify-between"><span>Memory overlap match:</span><span className="text-cyber-emerald">12%</span></div>
-                    <div className="border-t border-white/5 pt-1.5 mt-1.5 flex justify-between text-cyber-cyan font-bold">
-                      <span>Verdict:</span>
-                      <span>PUBLISHED BROADCAST</span>
+                  {/* Why Not This competing option */}
+                  <div className="border-t border-white/10 pt-4 font-mono text-[9px] space-y-2">
+                    <span className="text-white block font-display uppercase tracking-widest font-bold">Why Not This? Competing Audit</span>
+                    <div className="p-3 rounded border border-red-500/20 bg-red-500/5 space-y-1">
+                      <div className="flex justify-between text-[8px] text-red-400">
+                        <span>Rejected Competing Alternative</span>
+                        <span>Outside Editorial Policy</span>
+                      </div>
+                      <div className="text-white font-semibold truncate">
+                        {selectedPostForDrawer.category === 'Agentic AI' ? "Autonomous Agent Meme Redirection Engine" : "Consumer AI Gadget Launch & Funding Announcements"}
+                      </div>
+                      <p className="text-[8.5px] text-gray-500 leading-relaxed pt-1">
+                        {selectedPostForDrawer.category === 'Agentic AI' 
+                          ? "Rejected because it is consumer marketing trends with limited technical engineering significance." 
+                          : "Rejected as consumer product fluff rather than technical systems architecture breakthrough."}
+                      </p>
                     </div>
                   </div>
                 </div>

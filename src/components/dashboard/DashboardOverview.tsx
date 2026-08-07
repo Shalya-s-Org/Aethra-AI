@@ -26,7 +26,10 @@ export const DashboardOverview: React.FC = () => {
     currentTaskName,
     nextPublishCountdown,
     pipelineStats,
-    rejectedTodayList
+    rejectedTodayList,
+    lastDecisionTimeSeconds,
+    autonomousTimelineLogs,
+    novaLiveFocus
   } = useAgent();
 
   const [selectedPostForDrawer, setSelectedPostForDrawer] = useState<Post | null>(null);
@@ -44,14 +47,28 @@ export const DashboardOverview: React.FC = () => {
     switch (status) {
       case 'scanning': return "Source Ingestion & Registry Ingress";
       case 'filtering': return "Credibility Scan & Noise Filtration";
-      case 'reasoning': return "Heuristic Scoring & Impact Analysis";
+      case 'reasoning': return "Evaluating Engineering Significance";
       case 'memory_check': return "Memory Comparison";
       case 'writing': return "Synthesizing Architecture Report";
-      case 'publishing': return "Signing Blocks & Feed Serialization";
-      case 'learning': return "Commit to Vector Index & Graph Growth";
-      default: return "Idle Monitoring";
+      case 'publishing': return "Sharing Technical Insight";
+      case 'learning': return "Learned from Today's Publication";
+      default: return "Observing AI Ecosystem";
     }
   }, [status]);
+
+  const getHumanizedStatus = (s: string) => {
+    switch (s) {
+      case 'scanning': return 'Observing AI Ecosystem';
+      case 'filtering': return 'Removing Low-Value Topics';
+      case 'reasoning': return 'Evaluating Engineering Significance';
+      case 'memory_check': return 'Checking Historical Memory';
+      case 'writing': return 'Synthesizing Architecture Report';
+      case 'publishing': return 'Sharing Technical Insight';
+      case 'learning': return 'Learned from Today\'s Publication';
+      case 'idle': return 'Observing AI Ecosystem';
+      default: return 'Active';
+    }
+  };
 
   // Top metrics
   const editorialMetrics = useMemo(() => {
@@ -241,28 +258,55 @@ export const DashboardOverview: React.FC = () => {
     ];
   }, []);
 
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.1
+      }
+    }
+  };
+
+  const itemVariants = {
+    hidden: { opacity: 0, x: -20 },
+    show: { opacity: 1, x: 0, transition: { type: "spring" as const, stiffness: 100 } }
+  };
+
   return (
     <div className="space-y-6">
-      {/* Live Thinking Status Ticker */}
-      <div className="bg-black/60 border border-cyber-cyan/20 px-4 py-2.5 rounded-lg flex items-center justify-between text-xs">
+      {/* Live AI Thought Stream */}
+      <div className="bg-black/60 border border-cyber-cyan/20 px-4 py-2.5 rounded-lg flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
         <div className="flex items-center gap-2">
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyber-cyan opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-cyber-cyan"></span>
           </span>
-          <span className="font-display font-semibold uppercase tracking-wider text-cyber-cyan">Aethra Thought Stream:</span>
+          <span className="font-display font-semibold uppercase tracking-wider text-cyber-cyan">Thought Stream:</span>
           <motion.span 
             key={liveThinkingIndex}
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -5 }}
-            className="text-gray-300 font-mono"
+            className="text-gray-300 font-mono italic"
           >
-            {thinkingMessages[liveThinkingIndex]}
+            "{thinkingMessages[liveThinkingIndex]}"
           </motion.span>
         </div>
-        <div className="text-[10px] text-gray-500 font-mono">
-          STATUS: ANALYZING
+
+        {/* Pulse Heartbeat */}
+        <div className="flex items-center gap-1.5 font-mono text-[9px] text-gray-500 uppercase tracking-widest pl-1 border-t md:border-t-0 border-white/5 pt-1.5 md:pt-0">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyber-emerald opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-cyber-emerald"></span>
+          </span>
+          <span className="text-white font-bold">● AI ACTIVE</span>
+          <span className="text-gray-700">|</span>
+          <span>Decision: <strong className="text-cyber-cyan">{lastDecisionTimeSeconds}s ago</strong></span>
+          <span className="text-gray-700">|</span>
+          <span>Next Ingest: <strong className="text-cyber-purple">{status !== 'idle' ? 'PAUSED' : `${countdown}s`}</strong></span>
+          <span className="text-gray-700">|</span>
+          <span>Cycle: <strong className="text-white">{getHumanizedStatus(status)}</strong></span>
         </div>
       </div>
 
@@ -280,7 +324,7 @@ export const DashboardOverview: React.FC = () => {
             </div>
             
             <div>
-              <h2 className="font-display text-[10px] text-gray-500 uppercase tracking-widest font-mono">
+              <h2 className="font-display text-xs font-bold text-gray-500 uppercase tracking-widest font-mono">
                 Current Mission
               </h2>
               <p className="font-display text-base font-bold text-white tracking-wide uppercase mt-1">
@@ -369,37 +413,37 @@ export const DashboardOverview: React.FC = () => {
         </h4>
         
         <div className="flex flex-col md:flex-row items-center justify-between gap-3 text-center md:text-left">
-          <div className="p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5">
+          <div className={cn("p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5", status === 'scanning' && "border-cyber-cyan/40 bg-cyber-cyan/5")}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Topics Found</div>
             <div className="font-display text-sm font-bold text-blue-400 mt-0.5">89</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
-          <div className="p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5">
+          <div className={cn("p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5", status === 'filtering' && "border-red-500/40 bg-red-500/5")}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Rejected</div>
             <div className="font-display text-sm font-bold text-red-400 mt-0.5">61</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
-          <div className="p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5">
+          <div className={cn("p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5", status === 'reasoning' && "border-yellow-500/40 bg-yellow-500/5")}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Investigating</div>
             <div className="font-display text-sm font-bold text-yellow-400 mt-0.5">18</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
-          <div className="p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5 animate-pulse">
+          <div className={cn("p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5", status === 'memory_check' && "border-cyber-purple/40 bg-cyber-purple/5")}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Selected</div>
             <div className="font-display text-sm font-bold text-cyber-purple mt-0.5">6</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
-          <div className="p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5">
+          <div className={cn("p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5", status === 'publishing' && "border-cyber-emerald/40 bg-cyber-emerald/5")}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Publishing</div>
             <div className="font-display text-sm font-bold text-cyber-emerald mt-0.5">2</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
-          <div className="p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5">
+          <div className={cn("p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5", status === 'learning' && "border-pink-500/40 bg-pink-500/5")}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Learning</div>
             <div className="font-display text-[9px] font-bold text-pink-400 mt-1 uppercase tracking-wider">Memory Updated</div>
           </div>
@@ -427,7 +471,29 @@ export const DashboardOverview: React.FC = () => {
 
               <div className="space-y-2.5 max-h-[580px] overflow-y-auto pr-1">
                 {candidateTopics.map((cand) => (
-                  <div key={cand.id} className="p-3 rounded bg-black/40 border border-white/5 text-[10px] space-y-2">
+                  <div 
+                    key={cand.id} 
+                    className="p-3 rounded bg-black/40 border border-white/5 text-[10px] space-y-2 cursor-pointer hover:border-cyber-cyan/35 transition-colors"
+                    onClick={() => {
+                      // Construct a dynamic mock Post based on candidate values
+                      const mockPost: Post = {
+                        id: cand.id,
+                        title: cand.title,
+                        createdAt: new Date().toISOString(),
+                        text: `Candidate topic sourced from ${cand.source}. Detailed credibility checking results indicate score of ${cand.credibilityScore}% with Novelty at ${cand.noveltyScore}%.`,
+                        opinion: `Editorial evaluation recommeds: ${cand.recommendation}. Engineering impact score calculated at ${cand.importanceScore}/100.`,
+                        sources: cand.sources,
+                        confidenceScore: cand.confidenceScore || 90,
+                        category: cand.category,
+                        importanceScore: cand.importanceScore || 80,
+                        noveltyScore: cand.noveltyScore || 80,
+                        rationale: cand.rejectionReason || `High technical architecture alignment in ${cand.category}.`,
+                        publicationId: `CAND-${cand.id.toUpperCase()}`,
+                        relatedPosts: []
+                      };
+                      setSelectedPostForDrawer(mockPost);
+                    }}
+                  >
                     <div className="flex justify-between items-start gap-2">
                       <span className="font-display font-medium text-white leading-relaxed truncate max-w-[170px]">
                         {cand.title}
@@ -462,92 +528,90 @@ export const DashboardOverview: React.FC = () => {
         </div>
 
         {/* Column 2: Today's Featured Publication & Drawer Triggers */}
-        <div className="lg:col-span-1 space-y-4 flex flex-col">
-          {posts.slice(0, 2).map((post) => (
-            <GlassCard 
-              key={post.id} 
-              className="p-5 flex flex-col justify-between cursor-pointer border-white/5 hover:border-cyber-cyan/35 hover:scale-[1.01] transition-all duration-300"
-              glowColor="cyan"
-              onClick={() => setSelectedPostForDrawer(post)}
-            >
-              <div className="space-y-3">
-                <div className="flex justify-between items-center border-b border-white/5 pb-2">
-                  <span className="text-[8px] text-cyber-cyan font-mono uppercase tracking-widest font-bold">
-                    Featured Publication • {post.publicationId}
-                  </span>
-                  <span className="font-mono text-[8px] text-cyber-emerald bg-cyber-emerald/10 px-1.5 py-0.2 rounded font-bold border border-cyber-emerald/20">
-                    Conf: {post.confidenceScore}%
-                  </span>
+        <div className="lg:col-span-1 space-y-4 flex flex-col justify-between">
+          <div className="space-y-4">
+            {posts.slice(0, 2).map((post) => (
+              <GlassCard 
+                key={post.id} 
+                className="p-5 flex flex-col justify-between cursor-pointer border-white/5 hover:border-cyber-cyan/35 hover:scale-[1.01] transition-all duration-300"
+                glowColor="cyan"
+                onClick={() => setSelectedPostForDrawer(post)}
+              >
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center border-b border-white/5 pb-2">
+                    <span className="text-[8px] text-cyber-cyan font-mono uppercase tracking-widest font-bold">
+                      Featured Publication • {post.publicationId}
+                    </span>
+                    <span className="font-mono text-[8px] text-cyber-emerald bg-cyber-emerald/10 px-1.5 py-0.2 rounded font-bold border border-cyber-emerald/20">
+                      Conf: {post.confidenceScore}%
+                    </span>
+                  </div>
+
+                  <h3 className="font-display text-xs font-semibold text-white tracking-wide uppercase truncate">
+                    {post.title}
+                  </h3>
+
+                  <p className="text-[10px] text-gray-400 leading-relaxed truncate-2-lines">
+                    {post.text.slice(0, 160)}...
+                  </p>
+
+                  {/* Explainability factors inline */}
+                  <div className="grid grid-cols-2 gap-2 border-t border-white/5 pt-2.5 font-mono text-[8px] text-gray-500">
+                    <div className="flex justify-between">
+                      <span>Credibility:</span>
+                      <span className="text-white">97%</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Novelty Index:</span>
+                      <span className="text-white">{post.noveltyScore}%</span>
+                    </div>
+                    <div className="flex justify-between font-bold">
+                      <span>Impact Rating:</span>
+                      <span className="text-cyber-cyan">{post.importanceScore}/100</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Memory match:</span>
+                      <span className="text-cyber-emerald">12%</span>
+                    </div>
+                  </div>
+
+                  {/* Why Not This competing option in card */}
+                  <div className="border-t border-white/5 pt-2 mt-2 flex justify-between items-center text-[7.5px] font-mono text-gray-500">
+                    <span>Alternative: <strong className="text-red-400">Low-Impact Marketing Launch</strong></span>
+                    <span className="text-cyber-cyan">Why Not?</span>
+                  </div>
                 </div>
+              </GlassCard>
+            ))}
+          </div>
 
-                <h3 className="font-display text-xs font-semibold text-white tracking-wide uppercase truncate">
-                  {post.title}
-                </h3>
-
-                <p className="text-[10px] text-gray-400 leading-relaxed truncate-2-lines">
-                  {post.text.slice(0, 160)}...
-                </p>
-
-                {/* Explainability factors inline */}
-                <div className="grid grid-cols-2 gap-2 border-t border-white/5 pt-2.5 font-mono text-[8px] text-gray-500">
-                  <div className="flex justify-between">
-                    <span>Credibility:</span>
-                    <span className="text-white">97%</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Novelty Index:</span>
-                    <span className="text-white">{post.noveltyScore}%</span>
-                  </div>
-                  <div className="flex justify-between font-bold">
-                    <span>Impact Rating:</span>
-                    <span className="text-cyber-cyan">{post.importanceScore}/100</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Memory match:</span>
-                    <span className="text-cyber-emerald">12%</span>
-                  </div>
-                </div>
-
-                <div className="text-[8px] text-gray-400 pl-2 border-l border-cyber-cyan/30 mt-2 font-mono">
-                  // Click card to open full decision replay logic
-                </div>
-              </div>
-            </GlassCard>
-          ))}
-
-          {/* Autonomous Timeline panel */}
+          {/* Autonomous Timeline panel (Now dynamically scrolling!) */}
           <GlassCard className="p-4 flex-1 flex flex-col justify-between" glowColor="none">
             <div className="mb-3">
               <h4 className="font-display text-[9px] font-bold text-gray-500 uppercase tracking-widest flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-cyber-cyan" />
-                Autonomous Ingestion Timeline
+                Autonomous Timeline Logs
               </h4>
             </div>
 
-            <div className="space-y-2 relative before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[1px] before:bg-white/5 pl-5 font-mono text-[9px]">
-              <div className="relative">
-                <span className="absolute -left-[20.5px] top-1.5 w-1.5 h-1.5 rounded-full bg-cyber-cyan" />
-                <span className="text-gray-500">08:00</span> Scanned 111 Topics
-              </div>
-              <div className="relative">
-                <span className="absolute -left-[20.5px] top-1.5 w-1.5 h-1.5 rounded-full bg-red-400" />
-                <span className="text-gray-500">08:04</span> Rejected 71 sources
-              </div>
-              <div className="relative">
-                <span className="absolute -left-[20.5px] top-1.5 w-1.5 h-1.5 rounded-full bg-yellow-400" />
-                <span className="text-gray-500">08:07</span> Compared 46 memory nodes
-              </div>
-              <div className="relative">
-                <span className="absolute -left-[20.5px] top-1.5 w-1.5 h-1.5 rounded-full bg-cyber-emerald" />
-                <span className="text-gray-500">08:09</span> Published DeepSeek MLA Analysis
-              </div>
-              <div className="relative">
-                <span className="absolute -left-[20.5px] top-1.5 w-1.5 h-1.5 rounded-full bg-cyber-purple" />
-                <span className="text-gray-500">08:10</span> Updated Knowledge Graph nodes
-              </div>
+            <div className="space-y-2.5 max-h-[170px] overflow-y-auto pr-1 relative before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[1px] before:bg-white/5 pl-5 font-mono text-[9px]">
+              <AnimatePresence initial={false}>
+                {autonomousTimelineLogs.map((log, idx) => (
+                  <motion.div 
+                    key={`${log.timestamp}-${idx}`}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="relative"
+                  >
+                    <span className="absolute -left-[20.5px] top-1.5 w-1.5 h-1.5 rounded-full bg-cyber-cyan" />
+                    <span className="text-gray-500 mr-1">{log.timestamp}</span> {log.message}
+                  </motion.div>
+                ))}
+              </AnimatePresence>
               <div className="relative pt-1 border-t border-white/5">
-                <span className="absolute -left-[20.5px] top-2.5 w-1.5 h-1.5 rounded-full bg-cyber-cyan animate-pulse" />
-                <span className="text-cyber-cyan font-bold">08:30</span> Next Scan sequence trigger
+                <span className="absolute -left-[20.5px] top-2.5 w-1.5 h-1.5 rounded-full bg-cyber-purple animate-pulse" />
+                <span className="text-cyber-purple font-bold">Scanning</span> Ticker sensor active
               </div>
             </div>
           </GlassCard>
@@ -555,7 +619,7 @@ export const DashboardOverview: React.FC = () => {
 
         {/* Column 3: Policy, Profile, Source Trust, Graph Preview */}
         <div className="lg:col-span-1 space-y-4">
-          {/* Persona Card */}
+          {/* Persona Card (Enhanced with Dr. Nova live focus status!) */}
           <GlassCard className="p-4" glowColor="purple">
             <div className="flex items-center gap-3 border-b border-white/5 pb-2 mb-2">
               <div className="w-7 h-7 rounded-full bg-cyber-purple/10 flex items-center justify-center border border-cyber-purple/20">
@@ -569,6 +633,19 @@ export const DashboardOverview: React.FC = () => {
 
             <div className="space-y-1.5 text-[9px] font-mono leading-relaxed text-gray-400">
               <div><strong className="text-white uppercase font-display text-[8px]">Mission:</strong> Publish only high-impact AI engineering breakthroughs.</div>
+              
+              {/* Dynamic Live Status */}
+              <div className="border-t border-white/5 pt-2 mt-2 space-y-1 text-gray-300 font-mono">
+                <div className="flex justify-between text-[8px] uppercase tracking-wider text-gray-500">
+                  <span>Live Agent Status</span>
+                  <span className="text-cyber-cyan animate-pulse">● Active Work</span>
+                </div>
+                <div><span className="text-cyber-cyan">Current Focus:</span> {novaLiveFocus.focus}</div>
+                <div><span className="text-cyber-cyan">Current Goal:</span> {novaLiveFocus.goal}</div>
+                <div><span className="text-cyber-cyan">Current Reasoning:</span> {novaLiveFocus.reasoning}</div>
+                <div><span className="text-cyber-cyan">Est. Completion:</span> {status !== 'idle' ? `${novaLiveFocus.estimatedCompletionSeconds}s` : "N/A"}</div>
+              </div>
+
               <div className="grid grid-cols-2 gap-2 border-t border-white/5 pt-1.5 mt-1.5 text-[8px] uppercase tracking-wider">
                 <div>Personality: <strong className="text-white block mt-0.5">Research First, Calm</strong></div>
                 <div>Frequency: <strong className="text-cyber-cyan block mt-0.5">Every 30 mins</strong></div>
@@ -695,7 +772,7 @@ export const DashboardOverview: React.FC = () => {
         </div>
       </div>
 
-      {/* 6. Decision Replay Side Drawer Modal */}
+      {/* 6. Decision Replay Side Drawer Modal (Enhanced with cascading stagger and scorecard explainers!) */}
       <AnimatePresence>
         {selectedPostForDrawer && (
           <div className="fixed inset-0 z-50 flex justify-end bg-black/70 backdrop-blur-sm">
@@ -709,8 +786,8 @@ export const DashboardOverview: React.FC = () => {
               transition={{ type: "tween", duration: 0.3 }}
               className="w-full max-w-md bg-[#0b0f19] border-l border-white/10 h-full p-6 relative overflow-y-auto z-10 flex flex-col justify-between"
             >
-              <div>
-                <div className="flex justify-between items-start border-b border-white/10 pb-4 mb-5">
+              <div className="space-y-5">
+                <div className="flex justify-between items-start border-b border-white/10 pb-4 mb-2">
                   <div>
                     <h3 className="font-display text-sm font-bold text-cyber-cyan uppercase tracking-wider">
                       Decision Replay Logs
@@ -729,59 +806,161 @@ export const DashboardOverview: React.FC = () => {
 
                 <div className="space-y-4">
                   <div>
-                    <span className="text-[8px] text-gray-500 font-mono uppercase tracking-widest font-bold">Audited Publication Headline</span>
+                    <span className="text-[8px] text-gray-500 font-mono uppercase tracking-widest font-bold">Audited Headline</span>
                     <h2 className="font-display text-xs font-bold text-white uppercase tracking-wide leading-relaxed mt-1">
                       {selectedPostForDrawer.title}
                     </h2>
                   </div>
 
-                  {/* Flow Steps */}
-                  <div className="space-y-3 relative before:absolute before:left-3 before:top-2 before:bottom-2 before:w-[1px] before:bg-cyber-cyan/20 pl-7 font-mono text-[10px]">
-                    <div className="relative">
+                  {/* Flow Steps with Staggered Visual Cascading */}
+                  <motion.div 
+                    variants={containerVariants}
+                    initial="hidden"
+                    animate="show"
+                    className="space-y-3.5 relative before:absolute before:left-3 before:top-2 before:bottom-2 before:w-[1px] before:bg-cyber-cyan/20 pl-7 font-mono text-[9.5px] text-gray-400"
+                  >
+                    <motion.div variants={itemVariants} className="relative">
+                      <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white font-bold">✓</span>
+                      <span className="text-gray-500 mr-1.5">09:00</span> <span className="text-white font-semibold">Topic Discovered</span>
+                    </motion.div>
+                    
+                    <motion.div variants={itemVariants} className="relative pl-3 border-l border-white/5 text-gray-500 text-[8px] leading-relaxed">
+                      Sourced from streams: <span className="text-cyber-cyan font-bold">OpenAI</span> • <span className="text-cyber-cyan font-bold">GitHub</span> • <span className="text-cyber-cyan font-bold">arXiv</span>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative">
                       <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Step 1:</span> Found Topic from verified stream
-                    </div>
-                    <div className="relative">
+                      <span className="text-gray-500">Credibility Analysis:</span> <strong className="text-white">97% score</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative">
                       <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Step 2:</span> Verified Source credibility (<strong className="text-white">97%</strong>)
-                    </div>
-                    <div className="relative">
+                      <span className="text-gray-500">Competitor Audit:</span> Compared against <strong className="text-white">23 competing topics</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative">
                       <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Step 3:</span> Compared with <strong className="text-white">18 prior publications</strong> in index
-                    </div>
-                    <div className="relative">
+                      <span className="text-gray-500">Memory Comparison:</span> Scanned <strong className="text-white">18 previous publications</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative pl-3 border-l border-white/5 text-gray-500 text-[8px] leading-relaxed">
+                      Duplicate similarity score: <strong className="text-cyber-emerald">12% probability</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative">
                       <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Step 4:</span> Memory collision check passed (<strong className="text-cyber-emerald">12% similarity</strong>)
-                    </div>
-                    <div className="relative">
+                      <span className="text-gray-500">Novelty Score:</span> Rated at <strong className="text-white">{selectedPostForDrawer.noveltyScore}%</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative">
                       <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Step 5:</span> Impact scored at <strong className="text-white">{selectedPostForDrawer.importanceScore}/100</strong>
-                    </div>
-                    <div className="relative">
+                      <span className="text-gray-500">Engineering Impact:</span> Scored <strong className="text-cyber-cyan">{selectedPostForDrawer.importanceScore}/100</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative">
                       <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Step 6:</span> Novelty evaluated at <strong className="text-white">{selectedPostForDrawer.noveltyScore}/100</strong>
-                    </div>
-                    <div className="relative font-bold">
-                      <span className="absolute -left-[27px] top-1.5 w-2.5 h-2.5 rounded-full bg-cyber-cyan border border-cyber-cyan flex items-center justify-center text-[6px] text-black">✓</span>
-                      <span className="text-cyber-cyan">Step 7:</span> Editorial Decision: <strong className="text-cyber-cyan">PUBLISH</strong>
-                    </div>
-                    <div className="relative text-cyber-purple font-bold">
-                      <span className="absolute -left-[27px] top-1.5 w-2.5 h-2.5 rounded-full bg-cyber-purple border border-cyber-purple flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span>Step 8:</span> Knowledge Vector Graph updated: <strong className="text-cyber-purple">YES</strong>
+                      <span className="text-gray-500">Editorial Policy:</span> <strong className="text-cyber-emerald">PASS (Pure Tech)</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative">
+                      <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
+                      <span className="text-gray-500">Publishing Confidence:</span> <strong className="text-white">96% score</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative font-bold text-cyber-cyan">
+                      <span className="absolute -left-[27px] top-1.5 w-2.5 h-2.5 rounded-full bg-cyber-cyan border border-cyber-cyan flex items-center justify-center text-[6px] text-black font-bold">✓</span>
+                      Final Decision: <strong className="text-cyber-cyan">APPROVED</strong>
+                    </motion.div>
+
+                    <motion.div variants={itemVariants} className="relative text-cyber-purple font-bold">
+                      <span className="absolute -left-[27px] top-1.5 w-2.5 h-2.5 rounded-full bg-cyber-purple border border-cyber-purple flex items-center justify-center text-[6px] text-white font-bold">✓</span>
+                      Knowledge Graph Updated: YES
+                    </motion.div>
+                  </motion.div>
+
+                  {/* Detailed Scorecard Explainability */}
+                  <div className="border-t border-white/10 pt-4 space-y-3 font-mono text-[9px]">
+                    <span className="text-white block font-display uppercase tracking-widest font-bold">Decision Explainability Scorecard</span>
+                    
+                    <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
+                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
+                        <div className="flex justify-between font-bold">
+                          <span>Engineering Impact:</span>
+                          <span className="text-cyber-cyan">{selectedPostForDrawer.importanceScore}%</span>
+                        </div>
+                        <p className="text-[8px] text-gray-500 leading-normal">
+                          Measures the technical architecture depth and practical codebase applicability.
+                        </p>
+                      </div>
+
+                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
+                        <div className="flex justify-between font-bold">
+                          <span>Novelty Index:</span>
+                          <span className="text-cyber-cyan">{selectedPostForDrawer.noveltyScore}%</span>
+                        </div>
+                        <p className="text-[8px] text-gray-500 leading-normal">
+                          Assesses the uniqueness of this research against all previously indexed publications.
+                        </p>
+                      </div>
+
+                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
+                        <div className="flex justify-between font-bold">
+                          <span>Credibility Score:</span>
+                          <span className="text-white">97%</span>
+                        </div>
+                        <p className="text-[8px] text-gray-500 leading-normal">
+                          Evaluates the authority of source streams and commit integrity logs.
+                        </p>
+                      </div>
+
+                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
+                        <div className="flex justify-between font-bold">
+                          <span>Memory Similarity:</span>
+                          <span className="text-cyber-emerald">12%</span>
+                        </div>
+                        <p className="text-[8px] text-gray-500 leading-normal">
+                          Quantifies overlap probability with our historical document indices.
+                        </p>
+                      </div>
+
+                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
+                        <div className="flex justify-between font-bold">
+                          <span>Editorial Policy Match:</span>
+                          <span className="text-cyber-emerald">100%</span>
+                        </div>
+                        <p className="text-[8px] text-gray-500 leading-normal">
+                          Verifies conformity to our zero-hype, pure systems engineering criteria.
+                        </p>
+                      </div>
+
+                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
+                        <div className="flex justify-between font-bold">
+                          <span>Publishing Confidence:</span>
+                          <span className="text-white">96%</span>
+                        </div>
+                        <p className="text-[8px] text-gray-500 leading-normal">
+                          Calculated joint likelihood of editorial merit and audience relevancy.
+                        </p>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Summary parameters */}
-                  <div className="p-3.5 rounded bg-black/40 border border-white/5 text-[9px] font-mono space-y-1.5">
-                    <span className="text-white block font-display uppercase tracking-widest font-bold">Explainability Telemetry</span>
-                    <div className="flex justify-between"><span>Confidence:</span><span className="text-white">93%</span></div>
-                    <div className="flex justify-between"><span>Novelty:</span><span className="text-white">{selectedPostForDrawer.noveltyScore}%</span></div>
-                    <div className="flex justify-between"><span>Engineering Impact:</span><span className="text-white">{selectedPostForDrawer.importanceScore}/100</span></div>
-                    <div className="flex justify-between"><span>Credibility:</span><span className="text-white">97%</span></div>
-                    <div className="flex justify-between"><span>Memory overlap match:</span><span className="text-cyber-emerald">12%</span></div>
-                    <div className="border-t border-white/5 pt-1.5 mt-1.5 flex justify-between text-cyber-cyan font-bold">
-                      <span>Verdict:</span>
-                      <span>PUBLISHED BROADCAST</span>
+                  {/* Why Not This competing option */}
+                  <div className="border-t border-white/10 pt-4 font-mono text-[9px] space-y-2">
+                    <span className="text-white block font-display uppercase tracking-widest font-bold">Why Not This? Competing Audit</span>
+                    <div className="p-3 rounded border border-red-500/20 bg-red-500/5 space-y-1">
+                      <div className="flex justify-between text-[8px] text-red-400">
+                        <span>Rejected Competing Alternative</span>
+                        <span>Outside Editorial Policy</span>
+                      </div>
+                      <div className="text-white font-semibold truncate">
+                        {selectedPostForDrawer.category === 'Agentic AI' ? "Autonomous Agent Meme Redirection Engine" : "Consumer AI Gadget Launch & Funding Announcements"}
+                      </div>
+                      <p className="text-[8.5px] text-gray-500 leading-relaxed pt-1">
+                        {selectedPostForDrawer.category === 'Agentic AI' 
+                          ? "Rejected because it is consumer marketing trends with limited technical engineering significance." 
+                          : "Rejected as consumer product fluff rather than technical systems architecture breakthrough."}
+                      </p>
                     </div>
                   </div>
                 </div>

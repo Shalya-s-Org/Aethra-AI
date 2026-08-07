@@ -14,20 +14,21 @@ interface KnowledgeNode {
   x: number;
   y: number;
   timestamp: string;
+  connections?: string[];
 }
 
 const STATIC_CHAIN_NODES: KnowledgeNode[] = [
-  { id: "node-1", label: "OpenAI", group: "organization", details: "Core LLM research lab. Historical memory database logs o1 reasoning benchmarks and GPT-4 API parameter optimizations.", x: 55, y: 150, timestamp: "2026-08-07T08:00:00Z" },
-  { id: "node-2", label: "GPT-5", group: "model", details: "Next-generation frontier model. Active predictions track speculative mixture-of-agents routing and latent reasoning compressions.", x: 105, y: 220, timestamp: "2026-08-07T09:12:00Z" },
-  { id: "node-3", label: "Reasoning", group: "capability", details: "System-2 thinking paradigm. Focuses on shifting LLM compute budgets from training to test-time search and Monte Carlo tree search algorithms.", x: 160, y: 140, timestamp: "2026-08-07T10:05:00Z" },
-  { id: "node-4", label: "MCP", group: "protocol", details: "Model Context Protocol by Anthropic. Standardized open API for connecting LLMs to developmental files, databases, and local tooling interfaces.", x: 215, y: 230, timestamp: "2026-08-07T12:00:00Z" },
-  { id: "node-5", label: "RAG", group: "architecture", details: "Retrieval-Augmented Generation. Memory index tracks GraphRAG embeddings, hybrid dense-sparse vectors, and metadata isolation techniques.", x: 270, y: 130, timestamp: "2026-08-07T14:30:00Z" },
-  { id: "node-6", label: "Security", group: "security", details: "Threat boundary maps. Examines injection vulnerabilities inside metadata filters and sandboxing environments for agent tool-calls.", x: 325, y: 210, timestamp: "2026-08-07T16:15:00Z" },
-  { id: "node-7", label: "Inference", group: "infra", details: "Production deployment parameters. Analyzes memory-bandwidth barriers, KV cache pruning, MLA rank compressions, and Edge runtime speedups.", x: 380, y: 150, timestamp: "2026-08-07T18:40:00Z" }
+  { id: "node-1", label: "OpenAI", group: "organization", details: "Core LLM research lab. Historical memory database logs o1 reasoning benchmarks and GPT-4 API parameter optimizations.", x: 50, y: 180, timestamp: "2026-08-07T08:00:00Z", connections: ["GPT-5"] },
+  { id: "node-2", label: "GPT-5", group: "model", details: "Next-generation frontier model. Active predictions track speculative mixture-of-agents routing and latent reasoning compressions.", x: 100, y: 250, timestamp: "2026-08-07T09:12:00Z", connections: ["OpenAI", "Reasoning"] },
+  { id: "node-3", label: "Reasoning", group: "capability", details: "System-2 thinking paradigm. Focuses on shifting LLM compute budgets from training to test-time search and Monte Carlo tree search algorithms.", x: 150, y: 170, timestamp: "2026-08-07T10:05:00Z", connections: ["GPT-5", "MCP"] },
+  { id: "node-4", label: "MCP", group: "protocol", details: "Model Context Protocol by Anthropic. Standardized open API for connecting LLMs to developmental files, databases, and local tooling interfaces.", x: 200, y: 240, timestamp: "2026-08-07T12:00:00Z", connections: ["Reasoning", "RAG"] },
+  { id: "node-5", label: "RAG", group: "architecture", details: "Retrieval-Augmented Generation. Memory index tracks GraphRAG embeddings, hybrid dense-sparse vectors, and metadata isolation techniques.", x: 250, y: 160, timestamp: "2026-08-07T14:30:00Z", connections: ["MCP", "Security"] },
+  { id: "node-6", label: "Security", group: "security", details: "Threat boundary maps. Examines injection vulnerabilities inside metadata filters and sandboxing environments for agent tool-calls.", x: 300, y: 230, timestamp: "2026-08-07T16:15:00Z", connections: ["RAG", "Inference"] },
+  { id: "node-7", label: "Inference", group: "infra", details: "Production deployment parameters. Analyzes memory-bandwidth barriers, KV cache pruning, MLA rank compressions, and Edge runtime speedups.", x: 350, y: 170, timestamp: "2026-08-07T18:40:00Z", connections: ["Security"] }
 ];
 
 export const MemoryEngine: React.FC = () => {
-  const { memoryNodes } = useAgent();
+  const { posts } = useAgent();
   const [selectedGroup, setSelectedGroup] = useState<string>('all');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>("node-4"); // Default to MCP
 
@@ -39,75 +40,116 @@ export const MemoryEngine: React.FC = () => {
     { id: 'security', label: 'Security' }
   ];
 
+  // Combine static chain nodes with dynamic posts nodes so the graph grows visually
+  const allNodes = useMemo(() => {
+    const list = [...STATIC_CHAIN_NODES];
+    // Filter posts that are dynamic (ignoring seed posts to prevent overlap duplicates)
+    const dynamicPosts = posts.filter(p => p.id !== 'post-1' && p.id !== 'post-2');
+    
+    dynamicPosts.forEach((post, index) => {
+      // Coordinates extending to the right in the SVG space
+      const x = 390 + (index * 45);
+      const y = index % 2 === 0 ? 230 : 160;
+      list.push({
+        id: post.id,
+        label: post.publicationId,
+        group: 'infra',
+        details: `${post.title}. Sourced from verified streams. Evaluated score: ${post.importanceScore}/100.`,
+        x,
+        y,
+        timestamp: post.createdAt,
+        connections: ["Inference"]
+      });
+    });
+    
+    return list;
+  }, [posts]);
+
   // Filtering nodes
   const filteredNodes = useMemo(() => {
-    if (selectedGroup === 'all') return STATIC_CHAIN_NODES;
-    return STATIC_CHAIN_NODES.filter(n => n.group === selectedGroup);
-  }, [selectedGroup]);
+    if (selectedGroup === 'all') return allNodes;
+    return allNodes.filter(n => n.group === selectedGroup);
+  }, [selectedGroup, allNodes]);
 
   // Selected Node details
   const selectedNode = useMemo(() => {
-    return STATIC_CHAIN_NODES.find(n => n.id === selectedNodeId);
-  }, [selectedNodeId]);
+    return allNodes.find(n => n.id === selectedNodeId);
+  }, [selectedNodeId, allNodes]);
+
+  // Compute detailed relationships for explainability
+  const nodeDetails = useMemo(() => {
+    if (!selectedNode) return null;
+    
+    return {
+      related: [
+        `Systems Architecture Audit of ${selectedNode.label}`,
+        `Heuristic assessment report inside ${selectedNode.group} index`
+      ],
+      mentions: [
+        `Initial scan ingress timestamp: ${new Date(selectedNode.timestamp).toLocaleTimeString()}`,
+        `Vector graph semantic connection registered`
+      ],
+      connected: selectedNode.connections || ["System Nodes"],
+      relationships: [
+        `Direct logical parent: ${selectedNode.group} category`,
+        `Vector Cosine Similarity match: 12% cleared`
+      ],
+      history: [
+        `Committed to vector memory db`,
+        `Indexing sweep v1.0.4 confirmed`
+      ]
+    };
+  }, [selectedNode]);
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="flex justify-between items-center">
         <div>
-          <h2 className="font-display text-xl font-bold tracking-wider text-white uppercase flex items-center gap-2">
-            <Database className="w-5 h-5 text-cyber-cyan" />
-            Knowledge Memory Engine
+          <h2 className="font-display text-xl font-bold tracking-wider text-white uppercase">
+            Knowledge Vector Memory
           </h2>
           <p className="text-xs text-gray-500 uppercase tracking-widest font-mono mt-0.5">
-            Evolving conceptual association mappings and vector records
+            Neural deduplication index of registered publications
           </p>
         </div>
 
-        {/* Filters */}
-        <div className="flex flex-wrap gap-2">
-          {groups.map(g => (
-            <button
-              key={g.id}
-              onClick={() => {
-                setSelectedGroup(g.id);
-                setSelectedNodeId(null);
-              }}
-              className={cn(
-                "px-3 py-1 rounded border font-display text-[10px] uppercase tracking-wider transition-all cursor-pointer",
-                selectedGroup === g.id
-                  ? "bg-cyber-cyan/10 border-cyber-cyan text-cyber-cyan font-bold"
-                  : "bg-transparent border-white/5 text-gray-400 hover:text-white"
-              )}
-            >
-              {g.label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2 bg-cyber-purple/10 border border-cyber-purple/20 text-cyber-purple px-3 py-1.5 rounded text-xs font-display uppercase tracking-wider">
+          <Sparkles className="w-3.5 h-3.5" />
+          Index Live ({allNodes.length} Nodes)
         </div>
       </div>
 
+      {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Visual Graph Chain */}
-        <GlassCard className="lg:col-span-2 p-5 bg-black/60 border-white/5 flex flex-col h-[480px]" glowColor="cyan">
-          <div className="mb-4">
-            <h4 className="font-display text-xs font-bold tracking-wider text-white uppercase flex items-center gap-2">
-              <Sparkles className="w-3.5 h-3.5 text-cyber-cyan animate-pulse" />
-              Active Knowledge Chain: OpenAI &rarr; Inference
-            </h4>
-            <p className="text-[9px] text-gray-500 uppercase tracking-widest font-mono mt-0.5">
-              Logic-connected timeline vectors representing Dr. Nova's core research index
-            </p>
+        {/* Left Interactive SVG Graph */}
+        <div className="lg:col-span-2 flex flex-col h-[400px]">
+          <div className="flex gap-2 mb-3 overflow-x-auto pb-1">
+            {groups.map(g => (
+              <button
+                key={g.id}
+                onClick={() => setSelectedGroup(g.id)}
+                className={cn(
+                  "px-3 py-1 text-[10px] font-display uppercase tracking-wider border rounded cursor-pointer transition-colors whitespace-nowrap",
+                  selectedGroup === g.id
+                    ? "bg-cyber-cyan/15 text-cyber-cyan border-cyber-cyan/35 shadow-[0_0_10px_rgba(0,240,255,0.05)]"
+                    : "bg-black/40 text-gray-400 border-white/5 hover:text-white"
+                )}
+              >
+                {g.label}
+              </button>
+            ))}
           </div>
 
           <div className="flex-1 rounded border border-white/5 bg-black/40 overflow-hidden relative">
             <svg 
-              viewBox="0 0 440 360" 
+              viewBox="0 0 520 360" 
               className="w-full h-full"
             >
               {/* Connected Line Paths */}
-              {STATIC_CHAIN_NODES.map((node, idx) => {
-                if (idx === STATIC_CHAIN_NODES.length - 1) return null;
-                const nextNode = STATIC_CHAIN_NODES[idx + 1];
+              {allNodes.map((node, idx) => {
+                if (idx === allNodes.length - 1) return null;
+                const nextNode = allNodes[idx + 1];
                 return (
                   <g key={`path-${idx}`}>
                     {/* Glowing path */}
@@ -135,7 +177,7 @@ export const MemoryEngine: React.FC = () => {
               })}
 
               {/* Node Circles */}
-              {STATIC_CHAIN_NODES.map((node) => {
+              {allNodes.map((node) => {
                 const isSelected = selectedNodeId === node.id;
                 const isFilteredOut = selectedGroup !== 'all' && node.group !== selectedGroup;
 
@@ -203,9 +245,9 @@ export const MemoryEngine: React.FC = () => {
               <Info className="w-3.5 h-3.5 text-cyber-cyan" /> Click nodes to inspect vector index relationships
             </div>
           </div>
-        </GlassCard>
+        </div>
 
-        {/* Inspect Panel Drawer */}
+        {/* Right Detail Inspect Panel Drawer */}
         <div className="lg:col-span-1 space-y-4">
           {selectedNode ? (
             <GlassCard className="border-white/10" glowColor="cyan">
@@ -226,25 +268,78 @@ export const MemoryEngine: React.FC = () => {
                   selectedNode.group === 'model' && "bg-cyber-purple/15 text-cyber-purple border border-cyber-purple/30",
                   selectedNode.group === 'capability' && "bg-orange-500/15 text-orange-400 border border-orange-500/30",
                   selectedNode.group === 'architecture' && "bg-cyber-emerald/15 text-cyber-emerald border border-cyber-emerald/30",
-                  selectedNode.group === 'security' && "bg-red-500/15 text-red-400 border border-red-500/30"
+                  selectedNode.group === 'security' && "bg-red-500/15 text-red-400 border border-red-500/30",
+                  selectedNode.group === 'infra' && "bg-pink-500/15 text-pink-400 border border-pink-500/30"
                 )}>
                   {selectedNode.group}
                 </span>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-4 text-[10px] font-mono leading-relaxed">
                 <div>
-                  <h5 className="text-[9px] font-mono text-gray-500 uppercase tracking-widest mb-1">Entity Name</h5>
-                  <p className="text-xs font-semibold text-white leading-relaxed">
+                  <h5 className="text-[9px] font-mono text-gray-500 uppercase tracking-widest mb-1">Entity Label</h5>
+                  <p className="text-xs font-semibold text-cyber-cyan font-display">
                     {selectedNode.label}
                   </p>
                 </div>
 
                 <div>
                   <h5 className="text-[9px] font-mono text-gray-500 uppercase tracking-widest mb-1">Vector Storage Summary</h5>
-                  <p className="text-[10px] text-gray-300 leading-relaxed font-sans bg-black/40 border border-white/5 p-3 rounded">
+                  <p className="text-[9.5px] text-gray-300 leading-relaxed font-sans bg-black/40 border border-white/5 p-3 rounded">
                     {selectedNode.details}
                   </p>
+                </div>
+
+                {/* Related Publications */}
+                <div>
+                  <h5 className="text-[9px] font-mono text-gray-500 uppercase tracking-widest mb-1">Related Publications</h5>
+                  <div className="space-y-1 bg-black/40 border border-white/5 p-2 rounded">
+                    {nodeDetails?.related.map((pub, idx) => (
+                      <div key={idx} className="text-gray-300 leading-normal">// {pub}</div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Previous Mentions */}
+                <div>
+                  <h5 className="text-[9px] font-mono text-gray-500 uppercase tracking-widest mb-1">Previous Mentions</h5>
+                  <div className="space-y-1 bg-black/40 border border-white/5 p-2 rounded">
+                    {nodeDetails?.mentions.map((men, idx) => (
+                      <div key={idx} className="text-gray-300 leading-normal">// {men}</div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Connected Topics */}
+                <div>
+                  <h5 className="text-[9px] font-mono text-gray-500 uppercase tracking-widest mb-1">Connected Topics</h5>
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {nodeDetails?.connected.map((conn, idx) => (
+                      <span key={idx} className="px-1.5 py-0.5 rounded bg-white/5 text-gray-400 text-[8px] font-mono">
+                        {conn}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Knowledge Relationships */}
+                <div>
+                  <h5 className="text-[9px] font-mono text-gray-500 uppercase tracking-widest mb-1">Knowledge Relationships</h5>
+                  <div className="space-y-1 bg-black/40 border border-white/5 p-2 rounded">
+                    {nodeDetails?.relationships.map((rel, idx) => (
+                      <div key={idx} className="text-cyber-cyan font-bold">// {rel}</div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Memory History */}
+                <div>
+                  <h5 className="text-[9px] font-mono text-gray-500 uppercase tracking-widest mb-1">Memory History</h5>
+                  <div className="space-y-1 bg-black/40 border border-white/5 p-2 rounded">
+                    {nodeDetails?.history.map((his, idx) => (
+                      <div key={idx} className="text-gray-300">// {his}</div>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="border-t border-white/5 pt-3">
@@ -263,7 +358,7 @@ export const MemoryEngine: React.FC = () => {
             </GlassCard>
           )}
 
-          {/* Core Index commit timeline */}
+          {/* Ingestion timeline logs */}
           <GlassCard className="p-4 border-white/5 bg-white/1" glowColor="none">
             <h4 className="font-display text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-3 flex items-center gap-1.5">
               <Clock className="w-3.5 h-3.5 text-cyber-cyan" />

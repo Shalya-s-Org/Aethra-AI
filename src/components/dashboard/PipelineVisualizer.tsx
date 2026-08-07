@@ -17,13 +17,13 @@ export const PipelineVisualizer: React.FC = () => {
   const { status, activeTopic, pipelineProgress, currentActionDetails, pipelineStats } = useAgent();
 
   const pipelineSteps: Step[] = [
-    { status: 'scanning', label: 'SCAN', countKey: `${pipelineStats.scanCount} Topics`, icon: <Search className="w-4 h-4" />, color: 'text-blue-400 border-blue-500/20 bg-blue-500/5' },
-    { status: 'filtering', label: 'FILTER', countKey: `${pipelineStats.filterCount} Removed`, icon: <Filter className="w-4 h-4" />, color: 'text-yellow-400 border-yellow-500/20 bg-yellow-500/5' },
-    { status: 'reasoning', label: 'REASON', countKey: `${pipelineStats.reasonCount} Compared`, icon: <Cpu className="w-4 h-4" />, color: 'text-purple-400 border-purple-500/20 bg-purple-500/5' },
-    { status: 'memory_check', label: 'MEMORY', countKey: `${pipelineStats.memoryCount} Duplicates`, icon: <Database className="w-4 h-4" />, color: 'text-cyan-400 border-cyan-500/20 bg-cyan-500/5' },
-    { status: 'writing', label: 'WRITE', countKey: `${pipelineStats.writeCount} Drafts`, icon: <FileText className="w-4 h-4" />, color: 'text-indigo-400 border-indigo-500/20 bg-indigo-500/5' },
-    { status: 'publishing', label: 'PUBLISH', countKey: `${pipelineStats.publishCount} Published`, icon: <UploadCloud className="w-4 h-4" />, color: 'text-emerald-400 border-emerald-500/20 bg-emerald-500/5' },
-    { status: 'learning', label: 'LEARN', countKey: 'Memory Updated', icon: <GraduationCap className="w-4 h-4" />, color: 'text-pink-400 border-pink-500/20 bg-pink-500/5' }
+    { status: 'scanning', label: 'OBSERVE', countKey: 'AI Ecosystem', icon: <Search className="w-4 h-4" />, color: 'text-blue-400 border-blue-500/20 bg-blue-500/5' },
+    { status: 'filtering', label: 'PURGE', countKey: 'Low-Value', icon: <Filter className="w-4 h-4" />, color: 'text-yellow-400 border-yellow-500/20 bg-yellow-500/5' },
+    { status: 'reasoning', label: 'EVALUATE', countKey: 'Significance', icon: <Cpu className="w-4 h-4" />, color: 'text-purple-400 border-purple-500/20 bg-purple-500/5' },
+    { status: 'memory_check', label: 'COMPARE', countKey: 'Memory Index', icon: <Database className="w-4 h-4" />, color: 'text-cyan-400 border-cyan-500/20 bg-cyan-500/5' },
+    { status: 'writing', label: 'SYNTHESIZE', countKey: 'Report Draft', icon: <FileText className="w-4 h-4" />, color: 'text-indigo-400 border-indigo-500/20 bg-indigo-500/5' },
+    { status: 'publishing', label: 'SHARE', countKey: 'Tech Insight', icon: <UploadCloud className="w-4 h-4" />, color: 'text-emerald-400 border-emerald-500/20 bg-emerald-500/5' },
+    { status: 'learning', label: 'LEARN', countKey: 'From Today', icon: <GraduationCap className="w-4 h-4" />, color: 'text-pink-400 border-pink-500/20 bg-pink-500/5' }
   ];
 
   return (

@@ -65,6 +65,16 @@ interface AgentContextType {
   // Active Topic being processed
   activeTopic: Topic | null;
   pipelineProgress: number; 
+
+  // Dynamic Storytelling State
+  lastDecisionTimeSeconds: number;
+  autonomousTimelineLogs: Array<{ timestamp: string; message: string }>;
+  novaLiveFocus: {
+    focus: string;
+    goal: string;
+    reasoning: string;
+    estimatedCompletionSeconds: number;
+  };
 }
 
 const AgentContext = createContext<AgentContextType | undefined>(undefined);
@@ -118,6 +128,22 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [activeTab, setActiveTab] = useState<string>("dashboard");
   const [activeTopic, setActiveTopic] = useState<Topic | null>(null);
   const [pipelineProgress, setPipelineProgress] = useState<number>(0);
+
+  // Dynamic Storytelling State
+  const [lastDecisionTimeSeconds, setLastDecisionTimeSeconds] = useState<number>(32);
+  const [autonomousTimelineLogs, setAutonomousTimelineLogs] = useState<Array<{ timestamp: string; message: string }>>([
+    { timestamp: "08:00", message: "Scanned 111 incoming topics from AI labs" },
+    { timestamp: "08:04", message: "Filtered 71 low-credibility and noisy announcements" },
+    { timestamp: "08:07", message: "Compared 46 candidate topics against historical context" },
+    { timestamp: "08:09", message: "Published DeepSeek MLA Optimization Article" },
+    { timestamp: "08:10", message: "Vector index committed & knowledge graph nodes expanded" }
+  ]);
+  const [novaLiveFocus, setNovaLiveFocus] = useState({
+    focus: "Observing AI Ecosystem",
+    goal: "Ingest live research datasets",
+    reasoning: "Monitoring arXiv, GitHub, and major AI labs",
+    estimatedCompletionSeconds: 0
+  });
   
   const unprocessedPool = useRef<Topic[]>([]);
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -212,22 +238,22 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // Simulation steps duration mapping
     const steps = [
-      { status: 'scanning' as AgentStatus, duration: 2000, desc: `Scanning research repositories and developer updates...` },
-      { status: 'filtering' as AgentStatus, duration: 2500, desc: `Filtering out clickbait / testing credibility scores...` },
-      { status: 'reasoning' as AgentStatus, duration: 3000, desc: `Running reasoning engine. Evaluating core impact...` },
-      { status: 'memory_check' as AgentStatus, duration: 2500, desc: `Checking long-term memory for semantic duplication...` }
+      { status: 'scanning' as AgentStatus, duration: 2000, desc: "Observing AI Ecosystem: Ingesting research feeds..." },
+      { status: 'filtering' as AgentStatus, duration: 2500, desc: "Removing Low-Value Topics: Filtering marketing fluff..." },
+      { status: 'reasoning' as AgentStatus, duration: 3000, desc: "Evaluating Engineering Significance: Scoring systems impact..." },
+      { status: 'memory_check' as AgentStatus, duration: 2500, desc: "Checking Historical Memory: Comparing vector similarity..." }
     ];
 
     if (currentTopic.recommendation === 'Accept') {
       steps.push(
-        { status: 'writing' as AgentStatus, duration: 3500, desc: `Generating deep technical analysis and opinions...` },
-        { status: 'publishing' as AgentStatus, duration: 2000, desc: `Logging publication signature and broadcasting...` },
-        { status: 'learning' as AgentStatus, duration: 2000, desc: `Synthesizing memory nodes and updating knowledge graph...` }
+        { status: 'writing' as AgentStatus, duration: 3500, desc: "Synthesizing Architecture Report: Generating deep technical opinion..." },
+        { status: 'publishing' as AgentStatus, duration: 2000, desc: "Sharing Technical Insight: Broadcasting verified analysis..." },
+        { status: 'learning' as AgentStatus, duration: 2000, desc: "Learned from Today's Publication: Commit knowledge nodes..." }
       );
     } else {
       steps.push(
-        { status: 'publishing' as AgentStatus, duration: 2500, desc: `Logging rejection reasons inside editorial registry...` },
-        { status: 'learning' as AgentStatus, duration: 2000, desc: `Updating rejection weights and memory vectors...` }
+        { status: 'publishing' as AgentStatus, duration: 2500, desc: "Sharing Technical Insight: Logging rejection to editorial registry..." },
+        { status: 'learning' as AgentStatus, duration: 2000, desc: "Learned from Today's Publication: Adjusting neural filters..." }
       );
     }
 
@@ -236,10 +262,72 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const totalDuration = steps.reduce((sum, s) => sum + s.duration, 0);
 
     for (const step of steps) {
+      const stepDuration = step.duration;
+      const currentCumulative = cumulativeTime;
       setTimeout(() => {
         setStatus(step.status);
         setCurrentActionDetails(step.desc);
         setPipelineProgress(0);
+
+        // Update Dr. Nova live focus, goal, reasoning, and estimated completion
+        let focus = "Observing AI Ecosystem";
+        let goal = "Ingest live research datasets";
+        let reasoning = "Monitoring arXiv, GitHub, and major AI blogs";
+        const estSec = Math.max(1, Math.round((totalDuration - currentCumulative) / 1000));
+
+        if (step.status === 'scanning') {
+          focus = `Analyzing ${currentTopic.title.slice(0, 30)}...`;
+          goal = "Identify architectural engineering signals";
+          reasoning = "Ingesting RSS feeds and arXiv metadata";
+        } else if (step.status === 'filtering') {
+          focus = "Removing Low-Value Topics";
+          goal = "Purge marketing fluff and funding news";
+          reasoning = "Applying credibility score algorithms";
+        } else if (step.status === 'reasoning') {
+          focus = `Evaluating ${currentTopic.title.slice(0, 30)}`;
+          goal = "Determine engineering impact score";
+          reasoning = "Assessing novel systems architecture details";
+        } else if (step.status === 'memory_check') {
+          focus = "Checking Historical Memory";
+          goal = "Verify vector db for duplicate topics";
+          reasoning = "Measuring semantic cosine similarity";
+        } else if (step.status === 'writing') {
+          focus = "Synthesizing Architecture Report";
+          goal = "Formulate technical opinion & summary";
+          reasoning = "Analyzing production readiness constraints";
+        } else if (step.status === 'publishing') {
+          focus = "Sharing Technical Insight";
+          goal = "Publish to broadcast queue";
+          reasoning = "Signing publication block";
+        } else if (step.status === 'learning') {
+          focus = "Learned from Today's Publication";
+          goal = "Commit memory node links";
+          reasoning = "Expanding semantic vector relationships";
+        }
+
+        setNovaLiveFocus({
+          focus,
+          goal,
+          reasoning,
+          estimatedCompletionSeconds: estSec
+        });
+
+        // Dynamic log append
+        const padZero = (num: number) => String(num).padStart(2, '0');
+        const now = new Date();
+        const timeStr = `${padZero(now.getHours())}:${padZero(now.getMinutes())}`;
+
+        if (step.status === 'scanning') {
+          setAutonomousTimelineLogs(prev => [...prev, { timestamp: timeStr, message: `Discovered topic: ${currentTopic.title.slice(0, 40)}...` }]);
+        } else if (step.status === 'filtering' && currentTopic.recommendation === 'Reject') {
+          setAutonomousTimelineLogs(prev => [...prev, { timestamp: timeStr, message: `Removed topic by filters: ${currentTopic.title.slice(0, 30)}...` }]);
+        } else if (step.status === 'reasoning') {
+          setAutonomousTimelineLogs(prev => [...prev, { timestamp: timeStr, message: `Evaluated engineering impact: ${currentTopic.importanceScore}%` }]);
+        } else if (step.status === 'publishing' && currentTopic.recommendation === 'Accept') {
+          setAutonomousTimelineLogs(prev => [...prev, { timestamp: timeStr, message: `Shared technical insight for: ${currentTopic.title.slice(0, 30)}...` }]);
+        } else if (step.status === 'learning') {
+          setAutonomousTimelineLogs(prev => [...prev, { timestamp: timeStr, message: `Learned from Today's Publication: Updated knowledge graph` }]);
+        }
 
         // Stats adjustments as the pipeline executes
         if (step.status === 'filtering' && currentTopic.recommendation === 'Reject') {
@@ -287,11 +375,19 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Apply database updates at the end of loop
     setTimeout(() => {
       setStatus('idle');
-      setCurrentActionDetails("System monitoring streams. Next scan cycle in 30s.");
+      setCurrentActionDetails("Observing AI Ecosystem. Next scan cycle in 30s.");
       setActiveTopic(null);
       setPipelineProgress(0);
       setMissionProgress(0);
-      setCurrentTaskName("Monitoring trusted AI sources");
+      setCurrentTaskName("Observing AI Ecosystem");
+      setLastDecisionTimeSeconds(0); // Reset timer since last decision!
+
+      setNovaLiveFocus({
+        focus: "Observing AI Ecosystem",
+        goal: "Ingest live research datasets",
+        reasoning: "Monitoring arXiv, GitHub, and major AI blogs",
+        estimatedCompletionSeconds: 0
+      });
 
       setDecisions(prev => [currentTopic, ...prev]);
 
@@ -378,6 +474,9 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       // 2. Next publishing ticks down
       setNextPublishSeconds(prev => (prev <= 1 ? 5040 : prev - 1));
+
+      // 3. Ticks since last decision
+      setLastDecisionTimeSeconds(prev => prev + 1);
     }, 1000);
 
     return () => {
@@ -425,6 +524,20 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setRejectedTodayList(INITIAL_REJECTED_TODAY);
     setActiveTopic(null);
     setPipelineProgress(0);
+    setLastDecisionTimeSeconds(32);
+    setAutonomousTimelineLogs([
+      { timestamp: "08:00", message: "Scanned 111 incoming topics from AI labs" },
+      { timestamp: "08:04", message: "Filtered 71 low-credibility and noisy announcements" },
+      { timestamp: "08:07", message: "Compared 46 candidate topics against historical context" },
+      { timestamp: "08:09", message: "Published DeepSeek MLA Optimization Article" },
+      { timestamp: "08:10", message: "Vector index committed & knowledge graph nodes expanded" }
+    ]);
+    setNovaLiveFocus({
+      focus: "Observing AI Ecosystem",
+      goal: "Ingest live research datasets",
+      reasoning: "Monitoring arXiv, GitHub, and major AI labs",
+      estimatedCompletionSeconds: 0
+    });
     unprocessedPool.current = [...initialTopics];
   };
 
@@ -450,7 +563,10 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       activeTab,
       setActiveTab,
       activeTopic,
-      pipelineProgress
+      pipelineProgress,
+      lastDecisionTimeSeconds,
+      autonomousTimelineLogs,
+      novaLiveFocus
     }}>
       {children}
     </AgentContext.Provider>
