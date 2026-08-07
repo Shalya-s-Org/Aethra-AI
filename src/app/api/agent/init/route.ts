@@ -11,7 +11,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({
-      agentId: `agent-${name.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${Date.now().toString().slice(-4)}`,
+      agentId: `agent-${name.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       status: "initialized",
       message: `${name} has been successfully activated as the autonomous systems analyst. Heuristic engine online.`,
       timestamp: new Date().toISOString()
