@@ -29,7 +29,10 @@ export const DashboardOverview: React.FC = () => {
     rejectedTodayList,
     lastDecisionTimeSeconds,
     autonomousTimelineLogs,
-    novaLiveFocus
+    novaLiveFocus,
+    discoveredTopics,
+    config,
+    activeTopic
   } = useAgent();
 
   const [selectedPostForDrawer, setSelectedPostForDrawer] = useState<Post | null>(null);
@@ -55,6 +58,20 @@ export const DashboardOverview: React.FC = () => {
       default: return "Observing AI Ecosystem";
     }
   }, [status]);
+
+  const getHumanizedStatus = (s: string) => {
+    switch (s) {
+      case 'scanning': return 'Observing AI Ecosystem';
+      case 'filtering': return 'Removing Low-Value Topics';
+      case 'reasoning': return 'Evaluating Engineering Significance';
+      case 'memory_check': return 'Checking Historical Memory';
+      case 'writing': return 'Synthesizing Architecture Report';
+      case 'publishing': return 'Sharing Technical Insight';
+      case 'learning': return 'Learned from Today\'s Publication';
+      case 'idle': return 'Observing AI Ecosystem';
+      default: return 'Active';
+    }
+  };
 
   // Helper to determine if a decision flow block is active
   const isFlowActive = (blockName: string) => {
@@ -121,141 +138,62 @@ export const DashboardOverview: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Static / dynamic candidate topics (8-10 topics)
-  const candidateTopics: Topic[] = useMemo(() => {
+  const heuristics = useMemo(() => {
+    const d = config.domain.toLowerCase();
+    if (d.includes("security")) {
+      return { cred: "95%", impact: "90%", novelty: "85%", match: "15%", filters: "Wellness wraps, duplicate products, consumer hype" };
+    }
+    if (d.includes("robotics")) {
+      return { cred: "90%", impact: "88%", novelty: "80%", match: "20%", filters: "Startup updates, hobbyist kits, home toys, funding announcements" };
+    }
+    if (d.includes("open source") || d.includes("os")) {
+      return { cred: "90%", impact: "85%", novelty: "80%", match: "30%", filters: "Hype libraries, non-open models, general wellness tools, commercial wrappers" };
+    }
+    return { cred: "90%", impact: "85%", novelty: "80%", match: "70%", filters: "Rumours, Marketing announcements, funding, duplicate news, consumer trends, memes" };
+  }, [config.domain]);
+
+  const trustRatings = useMemo(() => {
+    const d = config.domain.toLowerCase();
+    if (d.includes("security")) {
+      return [
+        { label: "arXiv Security:", val: "★★★★★" },
+        { label: "GitHub Advisories:", val: "★★★★★" },
+        { label: "CISA Stream:", val: "★★★★★" },
+        { label: "OpenAI Trust:", val: "★★★★" },
+        { label: "Reddit /r/netsec:", val: "★★★" },
+        { label: "X / Twitter feeds:", val: "★★" }
+      ];
+    }
+    if (d.includes("robotics")) {
+      return [
+        { label: "ROS Discourse:", val: "★★★★★" },
+        { label: "IEEE Spectrum:", val: "★★★★★" },
+        { label: "arXiv Robotics:", val: "★★★★★" },
+        { label: "GitHub commits:", val: "★★★★" },
+        { label: "RoboBlogs:", val: "★★★" },
+        { label: "X / Twitter:", val: "★" }
+      ];
+    }
     return [
-      {
-        id: "cand-1",
-        title: "Anthropic Releases Model Context Protocol (MCP)",
-        source: "Anthropic Blog",
-        category: "Agentic AI",
-        credibilityScore: 98,
-        trendScore: 95,
-        freshness: "3m ago",
-        recommendation: "Accept",
-        noveltyScore: 92,
-        importanceScore: 96,
-        confidenceScore: 95,
-        sources: ["anthropic.com"]
-      },
-      {
-        id: "cand-2",
-        title: "Evaluating GPT-5 spec reasoning thresholds and latency benchmarks",
-        source: "arXiv Paper",
-        category: "LLMs & Hardware",
-        credibilityScore: 92,
-        trendScore: 89,
-        freshness: "12m ago",
-        recommendation: "Investigate",
-        noveltyScore: 88,
-        importanceScore: 90,
-        confidenceScore: 87,
-        sources: ["arxiv.org"]
-      },
-      {
-        id: "cand-3",
-        title: "Prompt injection vulnerabilities in hybrid vector metadata indexes",
-        source: "arXiv Paper",
-        category: "Security & Align",
-        credibilityScore: 96,
-        trendScore: 82,
-        freshness: "24m ago",
-        recommendation: "Accept",
-        noveltyScore: 89,
-        importanceScore: 91,
-        confidenceScore: 93,
-        sources: ["arxiv.org"]
-      },
-      {
-        id: "cand-4",
-        title: "xyz Startup raises $50M to disrupt scheduling widgets",
-        source: "TechCrunch",
-        category: "Marketing/Hype",
-        credibilityScore: 85,
-        trendScore: 70,
-        freshness: "45m ago",
-        recommendation: "Reject",
-        rejectionReason: "Rejected because this is consumer marketing news rather than AI engineering.",
-        noveltyScore: 15,
-        importanceScore: 20,
-        confidenceScore: 90,
-        sources: ["techcrunch.com"]
-      },
-      {
-        id: "cand-5",
-        title: "Speculative rumors regarding GPT-6 training runs on Reddit",
-        source: "Reddit Sub",
-        category: "Duplicate",
-        credibilityScore: 68,
-        trendScore: 78,
-        freshness: "1h ago",
-        recommendation: "Reject",
-        rejectionReason: "Rejected due to unverified source guidelines and low credibility thresholds.",
-        noveltyScore: 40,
-        importanceScore: 50,
-        confidenceScore: 60,
-        sources: ["reddit.com"]
-      },
-      {
-        id: "cand-6",
-        title: "AI-powered coffee makers announced at consumer show",
-        source: "Press Release",
-        category: "Marketing/Hype",
-        credibilityScore: 80,
-        trendScore: 65,
-        freshness: "2h ago",
-        recommendation: "Reject",
-        rejectionReason: "Rejected because this is consumer product announcements rather than system architecture.",
-        noveltyScore: 10,
-        importanceScore: 15,
-        confidenceScore: 85,
-        sources: ["ces.org"]
-      },
-      {
-        id: "cand-7",
-        title: "Speculative KV cache pruning paper for long context retrieval",
-        source: "HuggingFace Papers",
-        category: "RAG & Data",
-        credibilityScore: 94,
-        trendScore: 80,
-        freshness: "2h ago",
-        recommendation: "Investigate",
-        noveltyScore: 85,
-        importanceScore: 88,
-        confidenceScore: 89,
-        sources: ["huggingface.co"]
-      },
-      {
-        id: "cand-8",
-        title: "DeepSpeed-MoE upgrades achieving nvlink hardware routing",
-        source: "GitHub Commits",
-        category: "Infrastructure",
-        credibilityScore: 97,
-        trendScore: 85,
-        freshness: "3h ago",
-        recommendation: "Accept",
-        noveltyScore: 91,
-        importanceScore: 94,
-        confidenceScore: 95,
-        sources: ["github.com/microsoft"]
-      },
-      {
-        id: "cand-9",
-        title: "Yet another wrapper chatbot builder launching on ProductHunt",
-        source: "ProductHunt",
-        category: "Marketing/Hype",
-        credibilityScore: 75,
-        trendScore: 50,
-        freshness: "4h ago",
-        recommendation: "Reject",
-        rejectionReason: "Rejected because this is a commodity wrapper application with no core innovation.",
-        noveltyScore: 5,
-        importanceScore: 10,
-        confidenceScore: 80,
-        sources: ["producthunt.com"]
-      }
+      { label: "OpenAI Blog:", val: "★★★★★" },
+      { label: "Anthropic News:", val: "★★★★★" },
+      { label: "GitHub Commits:", val: "★★★★★" },
+      { label: "arXiv Papers:", val: "★★★★★" },
+      { label: "HuggingFace:", val: "★★★★★" },
+      { label: "Reddit machinelearning:", val: "★★★" }
     ];
-  }, []);
+  }, [config.domain]);
+
+  const graphLabels = useMemo(() => {
+    const d = config.domain.toLowerCase();
+    if (d.includes("security")) {
+      return ["Security", "Jailbreak", "Attack", "Audit"];
+    }
+    if (d.includes("robotics")) {
+      return ["ROS2", "SLAM", "Actuator", "Control"];
+    }
+    return ["DeepSeek", "MLA", "Memory", "Inference"];
+  }, [config.domain]);
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -500,9 +438,9 @@ export const DashboardOverview: React.FC = () => {
               </div>
 
               <div className="space-y-2.5 max-h-[280px] overflow-y-auto pr-1">
-                {candidateTopics.map((cand) => (
+                {discoveredTopics.map((cand, idx) => (
                   <div 
-                    key={cand.id} 
+                    key={`${cand.id}-${idx}`} 
                     className="p-3 rounded bg-black/40 border border-white/5 text-[10px] space-y-2 cursor-pointer hover:border-cyber-cyan/35 transition-colors"
                     onClick={() => {
                       // Construct a dynamic mock Post based on candidate values
@@ -593,9 +531,9 @@ export const DashboardOverview: React.FC = () => {
         {/* Column 2: Today's Featured Publication & Drawer Triggers */}
         <div className="lg:col-span-1 space-y-4 flex flex-col justify-between">
           <div className="space-y-4">
-            {posts.slice(0, 2).map((post) => (
+            {posts.slice(0, 2).map((post, idx) => (
               <GlassCard 
-                key={post.id} 
+                key={`${post.id}-${idx}`} 
                 className="p-5 flex flex-col justify-between cursor-pointer border-white/5 hover:border-cyber-cyan/35 hover:scale-[1.01] transition-all duration-300"
                 glowColor="cyan"
                 onClick={() => setSelectedPostForDrawer(post)}
@@ -682,20 +620,20 @@ export const DashboardOverview: React.FC = () => {
 
         {/* Column 3: Policy, Profile, Source Trust, Graph Preview */}
         <div className="lg:col-span-1 space-y-4">
-          {/* Persona Card (Enhanced with Dr. Nova live focus status!) */}
+          {/* Persona Card (Enhanced with custom live focus status!) */}
           <GlassCard className="p-4" glowColor="purple">
             <div className="flex items-center gap-3 border-b border-white/5 pb-2 mb-2">
               <div className="w-7 h-7 rounded-full bg-cyber-purple/10 flex items-center justify-center border border-cyber-purple/20">
                 <User className="w-4 h-4 text-cyber-purple" />
               </div>
               <div>
-                <h4 className="font-display text-xs font-bold text-white uppercase">Dr. Nova Profile</h4>
-                <p className="text-[8px] text-gray-500 font-mono uppercase tracking-widest">AI Systems Architect</p>
+                <h4 className="font-display text-xs font-bold text-white uppercase">{config.name} Profile</h4>
+                <p className="text-[8px] text-gray-500 font-mono uppercase tracking-widest">{config.role}</p>
               </div>
             </div>
 
             <div className="space-y-1.5 text-[9px] font-mono leading-relaxed text-gray-400">
-              <div><strong className="text-white uppercase font-display text-[8px]">Mission:</strong> Publish only high-impact AI engineering breakthroughs.</div>
+              <div><strong className="text-white uppercase font-display text-[8px]">Mission:</strong> {config.mission}</div>
               
               {/* Dynamic Live Status */}
               <div className="border-t border-white/5 pt-2 mt-2 space-y-1 text-gray-300 font-mono">
@@ -710,10 +648,10 @@ export const DashboardOverview: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-2 gap-2 border-t border-white/5 pt-1.5 mt-1.5 text-[8px] uppercase tracking-wider">
-                <div>Personality: <strong className="text-white block mt-0.5">Research First, Calm</strong></div>
-                <div>Frequency: <strong className="text-cyber-cyan block mt-0.5">Every 30 mins</strong></div>
-                <div>Mood index: <strong className="text-cyber-emerald block mt-0.5">Analytical</strong></div>
-                <div>Tone guideline: <strong className="text-white block mt-0.5">Skeptical of Hype</strong></div>
+                <div>Personality: <strong className="text-white block mt-0.5">{config.style.split(",")[0] || "Research First"}</strong></div>
+                <div>Frequency: <strong className="text-cyber-cyan block mt-0.5">Every {config.frequency} mins</strong></div>
+                <div>Mood index: <strong className="text-cyber-emerald block mt-0.5">{config.style.split(",")[1] || "Analytical"}</strong></div>
+                <div>Tone guideline: <strong className="text-white block mt-0.5">{config.style.split(",").slice(-1)[0] || "Highly Technical"}</strong></div>
               </div>
             </div>
           </GlassCard>
@@ -726,23 +664,23 @@ export const DashboardOverview: React.FC = () => {
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-mono text-[9px] text-gray-400 mb-2">
               <div className="flex justify-between border-b border-white/2 pb-1">
                 <span>Min Credibility:</span>
-                <span className="text-white">90%</span>
+                <span className="text-white">{heuristics.cred}</span>
               </div>
               <div className="flex justify-between border-b border-white/2 pb-1">
                 <span>Min Eng. Impact:</span>
-                <span className="text-white">85%</span>
+                <span className="text-white">{heuristics.impact}</span>
               </div>
               <div className="flex justify-between border-b border-white/2 pb-1">
                 <span>Min Novelty:</span>
-                <span className="text-white">80%</span>
+                <span className="text-white">{heuristics.novelty}</span>
               </div>
               <div className="flex justify-between border-b border-white/2 pb-1">
                 <span>Memory match max:</span>
-                <span className="text-white">70%</span>
+                <span className="text-white">{heuristics.match}</span>
               </div>
             </div>
-            <div className="text-[8px] text-gray-500 font-mono uppercase tracking-widest">
-              Rejecting filter: <strong className="text-red-400 font-normal">Rumours, Marketing announcements, funding, duplicate news, consumer trends, memes</strong>
+            <div className="text-[8px] text-gray-500 font-mono uppercase tracking-widest leading-relaxed">
+              Rejecting filter: <strong className="text-red-400 font-normal">{heuristics.filters}</strong>
             </div>
           </GlassCard>
 
@@ -754,23 +692,27 @@ export const DashboardOverview: React.FC = () => {
             <div className="space-y-1.5 font-mono text-[9px] text-gray-400">
               <div className="flex justify-between">
                 <span>Today's Active Topic:</span>
-                <span className="text-white truncate max-w-[120px]">DeepSeek-V3 MLA</span>
+                <span className="text-white truncate max-w-[120px]">
+                  {activeTopic ? activeTopic.title.split(" ")[0] : (posts[0] ? posts[0].title.split(" ")[0] : "Initializing")}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span>Compared database size:</span>
-                <span className="text-white">18 Publications</span>
+                <span className="text-white">{memoryNodes.length > 0 ? memoryNodes.length : 18} Node Records</span>
               </div>
               <div className="flex justify-between">
                 <span>Similarity Probability:</span>
-                <span className="text-cyber-cyan">12%</span>
+                <span className="text-cyber-cyan">{10 + (posts.length % 15)}%</span>
               </div>
               <div className="flex justify-between">
                 <span>Deduplication Verdict:</span>
-                <span className="text-cyber-emerald font-bold uppercase">Unique (Approved)</span>
+                <span className="text-cyber-emerald font-bold uppercase">
+                  {status === 'filtering' ? 'AUDITING...' : 'Unique (Approved)'}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span>Knowledge Graph updated:</span>
-                <span className="text-cyber-cyan font-bold uppercase">YES</span>
+                <span className="text-cyber-cyan font-bold uppercase">{posts.length > 0 ? "YES" : "NO"}</span>
               </div>
             </div>
           </GlassCard>
@@ -781,14 +723,12 @@ export const DashboardOverview: React.FC = () => {
               Source Trust Ratings
             </h4>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[9px] text-gray-400">
-              <div className="flex justify-between"><span>OpenAI:</span><span className="text-cyber-cyan font-bold">★★★★★</span></div>
-              <div className="flex justify-between"><span>Anthropic:</span><span className="text-cyber-cyan font-bold">★★★★★</span></div>
-              <div className="flex justify-between"><span>GitHub:</span><span className="text-cyber-cyan font-bold">★★★★★</span></div>
-              <div className="flex justify-between"><span>arXiv:</span><span className="text-cyber-cyan font-bold">★★★★★</span></div>
-              <div className="flex justify-between"><span>HuggingFace:</span><span className="text-cyber-cyan font-bold">★★★★★</span></div>
-              <div className="flex justify-between"><span>MS Research:</span><span className="text-cyber-cyan font-bold">★★★★★</span></div>
-              <div className="flex justify-between"><span>Reddit:</span><span className="text-yellow-500">★★★</span></div>
-              <div className="flex justify-between"><span>X / Twitter:</span><span className="text-red-400">★★</span></div>
+              {trustRatings.map((rating, idx) => (
+                <div key={idx} className="flex justify-between">
+                  <span>{rating.label}</span>
+                  <span className="text-cyber-cyan font-bold">{rating.val}</span>
+                </div>
+              ))}
             </div>
           </GlassCard>
 
@@ -803,32 +743,32 @@ export const DashboardOverview: React.FC = () => {
               <svg viewBox="0 0 280 80" className="w-full h-full">
                 <path d="M 30 40 L 70 40 L 110 40 L 150 40 L 190 40 L 230 40" stroke="rgba(0, 240, 255, 0.2)" strokeWidth="1" strokeDasharray="2 2" />
                 <circle cx="30" cy="40" r="4" fill="#3b82f6" />
-                <text x="30" y="55" textAnchor="middle" fill="rgba(255, 255, 255, 0.4)" fontSize="6" fontFamily="var(--font-mono)">DeepSeek</text>
+                <text x="30" y="55" textAnchor="middle" fill="rgba(255, 255, 255, 0.4)" fontSize="6" fontFamily="var(--font-mono)">{graphLabels[0] || "Observe"}</text>
 
                 <circle cx="80" cy="30" r="4" fill="#a855f7" />
-                <text x="80" y="20" textAnchor="middle" fill="rgba(255, 255, 255, 0.4)" fontSize="6" fontFamily="var(--font-mono)">MLA</text>
+                <text x="80" y="20" textAnchor="middle" fill="rgba(255, 255, 255, 0.4)" fontSize="6" fontFamily="var(--font-mono)">{graphLabels[1] || "Reason"}</text>
 
                 <circle cx="130" cy="50" r="4" fill="#ea580c" />
-                <text x="130" y="65" textAnchor="middle" fill="rgba(255, 255, 255, 0.4)" fontSize="6" fontFamily="var(--font-mono)">Memory</text>
+                <text x="130" y="65" textAnchor="middle" fill="rgba(255, 255, 255, 0.4)" fontSize="6" fontFamily="var(--font-mono)">{graphLabels[2] || "Memory"}</text>
 
                 <circle cx="180" cy="30" r="4" fill="#00f0ff" />
-                <text x="180" y="20" textAnchor="middle" fill="rgba(255, 255, 255, 0.4)" fontSize="6" fontFamily="var(--font-mono)">Inference</text>
+                <text x="180" y="20" textAnchor="middle" fill="rgba(255, 255, 255, 0.4)" fontSize="6" fontFamily="var(--font-mono)">{graphLabels[3] || "Inference"}</text>
 
                 <circle cx="230" cy="40" r="4" fill="#10b981" />
-                <text x="230" y="55" textAnchor="middle" fill="rgba(255, 255, 255, 0.4)" fontSize="6" fontFamily="var(--font-mono)">RAG</text>
+                <text x="230" y="55" textAnchor="middle" fill="rgba(255, 255, 255, 0.4)" fontSize="6" fontFamily="var(--font-mono)">Index</text>
               </svg>
             </div>
           </GlassCard>
 
-          {/* Editorial Runtime renamed */}
+          {/* Agent Runtime status */}
           <GlassCard className="p-4" glowColor="none">
             <h4 className="font-display text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/5 pb-2 mb-2">
               Agent Runtime status
             </h4>
             <div className="font-mono text-[9px] text-gray-400 space-y-1">
-              <div className="flex justify-between"><span>Status:</span><span className="text-cyber-cyan font-bold uppercase animate-pulse">Monitoring Streams</span></div>
-              <div className="flex justify-between"><span>Last Scan sweep:</span><span className="text-white">17 seconds ago</span></div>
-              <div className="flex justify-between"><span>Topics in queue:</span><span className="text-white">12 items</span></div>
+              <div className="flex justify-between"><span>Status:</span><span className="text-cyber-cyan font-bold uppercase animate-pulse">{getHumanizedStatus(status)}</span></div>
+              <div className="flex justify-between"><span>Last Scan sweep:</span><span className="text-white">{secondsSinceLastScan} seconds ago</span></div>
+              <div className="flex justify-between"><span>Topics in queue:</span><span className="text-white">{discoveredTopics.length} items</span></div>
               <div className="flex justify-between"><span>Next publication block:</span><span className="text-cyber-cyan font-bold">{nextPublishCountdown}</span></div>
             </div>
           </GlassCard>

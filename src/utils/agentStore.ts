@@ -104,13 +104,20 @@ export const progressivePosts: ServerPost[] = [
 ];
 
 export function getPostsForAgent(agentId: string): any[] {
-  // Extract timestamp from agentId. Example agentId format: "agent-dr-nova-1723000000000"
+  // Extract timestamp from agentId. Supports suffixes and format variations
   const parts = agentId.split('-');
-  const timestampStr = parts[parts.length - 1];
-  let initTime = parseInt(timestampStr, 10);
+  let initTime = NaN;
+  
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const parsed = parseInt(parts[i], 10);
+    if (!isNaN(parsed) && parsed > 1700000000000) {
+      initTime = parsed;
+      break;
+    }
+  }
   
   if (isNaN(initTime)) {
-    // Fallback if agentId does not end in a timestamp
+    // Fallback if agentId does not contain a timestamp
     initTime = Date.now() - 3600000; // Assume initialized 1 hour ago
   }
 

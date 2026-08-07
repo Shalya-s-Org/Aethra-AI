@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getPostsForAgent } from '../../../../utils/agentStore';
+import { getOrCreateAgentState } from '../../../../utils/agentEngine';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -9,14 +9,22 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Missing required query parameter: agentId" }, { status: 400 });
   }
 
-  // Retrieve deterministic progressive posts based on initialization timestamp encoded in agentId
-  const posts = getPostsForAgent(agentId);
+  // Retrieve dynamic agent state from backend
+  const agent = getOrCreateAgentState(agentId);
 
-  // Return newest first
-  const sortedPosts = [...posts].sort(
+  // Return formatted posts (reverse chronological: newest first)
+  const sortedPosts = [...agent.posts].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
 
-  return NextResponse.json({ posts: sortedPosts });
-}
+  // Return compliant payload structure
+  const formattedPosts = sortedPosts.map(p => ({
+    id: p.id,
+    createdAt: p.createdAt,
+    text: `${p.title}\n\n${p.text}\n\nAssessment: ${p.opinion}`,
+    rationale: p.rationale,
+    sources: p.sources
+  }));
 
+  return NextResponse.json({ posts: formattedPosts });
+}
