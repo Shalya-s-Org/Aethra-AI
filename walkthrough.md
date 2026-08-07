@@ -1,67 +1,57 @@
-# Walkthrough - AETHRA AI Storytelling & Autonomy Upgrades
+# Walkthrough - AETHRA AI Backend Agent Architecture & Simulation Engine
 
-AETHRA AI has been fully upgraded into an immersive, living **Autonomous Editorial Intelligence System** under the command of Dr. Nova (AI Systems Architect). The interface provides hackathon judges with direct visibility into real-time decision-making metrics, cognitive focus states, and explanatory reasoning traces.
+AETHRA AI has been fully upgraded from a mock client-side telemetry state into a **real, multi-agent server-side autonomous simulation engine**. All telemetry, schedules, decisions, memories, and candidate pools are now computed and updated independently on the Next.js API server, completely isolated by `agentId`.
 
-## Implemented Enhancements
+## Redesigned Backend Architecture & Data Flow
 
-### 1. Pre-Dashboard Stage Animations & "Initialize Agent" Sequence
-- **Landing Page Hero Upgrade:** Configured the landing page hero section with the headline **AETHRA AI** and subtitle **The Autonomous Editorial Intelligence System**.
-- **Interactive Sequence Walkthrough:** Integrated an inline animated sequence that automatically cycles through the core phases: `Discover` &rarr; `Reason` &rarr; `Remember` &rarr; `Publish` &rarr; `Learn`, explaining each phase in detail with Framer Motion transitions.
-- **Agent Initialization CTA:** Replaced CTA button labels with **Initialize Agent**, transitioning seamlessly to the dashboard on click.
+### 1. Isolated Persona Initialization (`POST /api/agent/init`)
+- Receives the persona configuration (`name` and `domain`).
+- Registers a new autonomous agent instance in a global backend registry (`global.agents`) mapped to a generated `agentId`.
+- Dynamically sets up domain-specific standard thresholds, editorial policies, and scheduling frequencies for that individual agent.
 
-### 2. Live Agent Activity Banner & Heartbeat Telemetry
-- **Live Thought Stream Banner:** Rendered a marquee/banner automatically scrolling Dr. Nova's active thinking states (e.g. "Evaluating DeepSeek MLA token optimizations...") at the top of the dashboard.
-- **Autonomous Heartbeat Indicator:** Positioned a glowing `● AI ACTIVE` widget showing:
-  - Time since last decision (seconds ago)
-  - Countdown to next scan sequence
-  - Current cycle description mapped to humanized natural intelligence labels.
-- **Dr. Nova Live Work Card:** Upgraded the profile block in `DashboardOverview.tsx` to showcase active agent focus tracking parameters:
-  - *Current Focus*
-  - *Current Goal*
-  - *Current Reasoning*
-  - *Estimated Completion*
+### 2. Multi-Agent Registry & Scheduler Loop (`src/utils/agentEngine.ts`)
+- Maintains concurrent, fully isolated `BackendAgentInstance` objects. Memory, feeds, rejections, timeline logs, and metrics are never shared between different agents.
+- Automatically launches an in-memory background loop for each registered agent that ticks every second on the backend.
+- Loops autonomously through the standard cycle: `scanning` (Observe) &rarr; `filtering` (Purge) &rarr; `reasoning` (Evaluate) &rarr; `memory_check` (Compare) &rarr; `writing` (Synthesize) &rarr; `publishing` (Share) &rarr; `learning` (Learn) &rarr; `idle` (Sleep).
 
-### 3. Cascading Decision Replay Drawer
-- **Sequential Staggered Animation:** Clicking any candidate topic or published article opens a side drawer featuring a complete cascading reasoning timeline:
-  - `Topic Discovered` &rarr; `Source Verified` &rarr; `Credibility Scan` &rarr; `Competitor Audit` &rarr; `Memory Compare` &rarr; `Novelty Assessment` &rarr; `Editorial Policy Match` &rarr; `Confidence Scored` &rarr; `Approved Verdict`.
-  - Built with Framer Motion spring staggers for a high-end "replaying" visual experience.
-- **Detailed Scorecard Explanations:** Explains the rationale behind each component score (Engineering Impact, Novelty Index, Credibility, Memory Similarity, Editorial Match, Confidence) with human explainer sentences.
-- **"Why Not This?" Alternative Audit:** Displays a side-by-side comparison detailing the selected topic versus the rejected alternative (e.g. consumer hype/meme fluff) along with its specific filtration rationale.
+### 3. Persona-Driven Discovery & Editorial Engine
+- **Domain-Specific Pools:** Maintains separate candidate topic pools for **AI Security** (e.g. prompt injection vectors, sandbox escapes), **Robotics** (e.g. SLAM map optimizations, real-time ROS2 schedulers), and **Open Source AI** (e.g. quantization perplexities, speculative decoding).
+- **Heuristic Valuation:** During the reasoning loop, candidate values for credibility, engineering impact, novelty, and memory duplicates are dynamically calculated. Rejections (like consumer startup widgets or funding hype) are logged to the agent's specific `rejectedTodayList` with detailed rationales.
 
-### 4. Scrolling Timeline Log Widget
-- **Continuous Log Streaming:** Transformed the static timeline in the dashboard to map live scrolling logs from the active agent state, animating new entries onto the timeline with transition effects.
+### 4. Vector Memory & Growable Knowledge Graph
+- Newly published articles are pushed into the agent's specific posts history and vector memory.
+- Dynamic semantic nodes are generated and linked dynamically inside `memoryNodes` (e.g. `mem-topic`, `mem-opinion` pairs), which expands the SVG knowledge graph in the UI.
+- All decisions consult prior memory logs before publishing to ensure deduplication.
 
-### 5. Interactive Memory Graph Nodes
-- **Dynamic Node Generation:** Configured the memory graph SVG to dynamically append new nodes as new publications are committed, making the graph grow visually over time.
-- **Logical Inspector Details:** Clicking any node reveals detailed vector payloads including:
-  - *Related Publications*
-  - *Previous Mentions*
-  - *Connected Topics*
-  - *Knowledge Relationships*
-  - *Memory History logs*
+### 5. API State Polling Synchronization (`AgentContext.tsx`)
+- The client-side context provider `AgentContext.tsx` is clean of mock logic, simulation loops, or static mock lists.
+- On initialization, it triggers `POST /api/agent/init` to obtain the backend instance.
+- It then initiates a background poll request to `GET /api/agent/state?agentId=...` every 1.5 seconds, feeding the backend variables (countdown, current mission, status, activeTopic, rejections, logs) directly to the dashboard components.
 
 ---
 
 ## Technical Validation & Build Verification
 
-The complete codebase compiles cleanly to production. No TypeScript errors, warnings, or React duplicate key issues are present.
+The complete codebase compiles cleanly.
 
 ### Production Compile Output
 ```bash
 ▲ Next.js 16.3.0 (Turbopack)
-✓ Running next.config.ts took 33ms
+✓ Running next.config.ts took 31ms
 
   Creating an optimized production build ...
-✓ Compiled successfully in 1733ms
+✓ Compiled successfully in 2.3s
   Running TypeScript ...
-  Finished TypeScript in 2.2s ...
-  Collecting page data using 7 workers ...
-  Generating static pages using 7 workers (6/6) in 849ms
+  Finished TypeScript in 3.2s ...
+  Collecting page data using 8 workers ...
+  Generating static pages using 8 workers (7/7) in 632ms
   Finalizing page optimization ...
 
 Route (app)
 ┌ ○ /
 ├ ○ /_not-found
 ├ ƒ /api/agent/feed
-└ ƒ /api/agent/init
+├ ƒ /api/agent/init
+└ ƒ /api/agent/state
 ```
+No errors or warnings occurred.

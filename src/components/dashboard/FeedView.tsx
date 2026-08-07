@@ -61,12 +61,12 @@ export const FeedView: React.FC = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Feed Feed Stream */}
           <div className="lg:col-span-2 space-y-4">
-            {displayedPosts.map((post) => {
+            {displayedPosts.map((post, idx) => {
               const isActive = activePostId === post.id;
               
               return (
                 <GlassCard
-                  key={post.id}
+                  key={`${post.id}-${idx}`}
                   className={cn(
                     "p-6 transition-all duration-300 border-white/5 cursor-pointer",
                     isActive ? "border-cyber-cyan bg-cyber-cyan/3" : "hover:border-white/15"
