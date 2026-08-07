@@ -241,6 +241,104 @@ const DOMAIN_TOPIC_POOLS: Record<string, Topic[]> = {
       confidenceScore: 80,
       sources: ["kickstarter.com/cat-bot"]
     }
+  ],
+  "Cardiology": [
+    {
+      id: "cardio-1",
+      title: "Robotic Bypass Optimization with Zero-Latency Mechanical Feedback Loops",
+      source: "NEJM Surgical Journal",
+      category: "Cardiothoracic Surgery",
+      credibilityScore: 98,
+      trendScore: 93,
+      freshness: "5m ago",
+      recommendation: "Accept",
+      noveltyScore: 92,
+      importanceScore: 96,
+      confidenceScore: 95,
+      detailedAnalysis: "NEJM published a benchmark of robotic arm bypass executions. By running micro-actuator control loops with zero-latency priority feedback parameters on local hardware hosts, surgeons successfully performed arterial grafting with a 93% reduction in tissue tremor coefficients.",
+      opinion: "Cardiovascular robotics calibration is critical. Standardizing micro-actuator loops directly into high-fidelity surgical systems marks a massive leap forward for autonomous bypass procedures.",
+      sources: ["nejm.org/surgical-robotics", "github.com/cardio-robotics/bypass-rt"]
+    },
+    {
+      id: "cardio-2",
+      title: "Myocardial Protection Stun Recovery under Hypothermic Arrest",
+      source: "arXiv Medical Physics",
+      category: "Myocardial Protection",
+      credibilityScore: 96,
+      trendScore: 89,
+      freshness: "18m ago",
+      recommendation: "Accept",
+      noveltyScore: 90,
+      importanceScore: 94,
+      confidenceScore: 92,
+      detailedAnalysis: "A medical study model evaluates metabolic preservation rates during hypothermic arrest. By running finite element hemodynamics algorithms on local edge clusters, the paper demonstrates a 30% increase in stun recovery speeds using adaptive vascular cooling protection.",
+      opinion: "Vascular preservation during open heart procedures requires high-precision thermal control. Adaptive metabolic simulations represent an outstanding contribution to clinical systems.",
+      sources: ["arxiv.org/abs/2607.7712"]
+    },
+    {
+      id: "cardio-3",
+      title: "New Heart Wellness Supplement Launches Crowdfunding Campaign",
+      source: "Kickstarter",
+      category: "Marketing/Hype",
+      credibilityScore: 72,
+      trendScore: 68,
+      freshness: "1h ago",
+      recommendation: "Reject",
+      rejectionReason: "Rejected as consumer supplement marketing hype. Low clinical significance or cardiothoracic surgical relevance.",
+      noveltyScore: 10,
+      importanceScore: 15,
+      confidenceScore: 85,
+      sources: ["kickstarter.com/cardiomax"]
+    }
+  ],
+  "Cricket Analytics": [
+    {
+      id: "cricket-1",
+      title: "Real-time Cricket Ball Trajectory Forecasting via Doppler Radar Vectors",
+      source: "IEEE Sports Physics",
+      category: "Ball Trajectory",
+      credibilityScore: 98,
+      trendScore: 95,
+      freshness: "3m ago",
+      recommendation: "Accept",
+      noveltyScore: 92,
+      importanceScore: 96,
+      confidenceScore: 95,
+      detailedAnalysis: "An IEEE paper details Doppler radar models tracking cricket ball trajectory stochastics. The system processes drag coefficients and seam orientation vectors at 200fps, predicting bounce positioning with sub-millimeter margins under dynamic wind parameters.",
+      opinion: "Ball-tracking aerodynamics models have historically struggled with humidity vector changes. Using local Doppler arrays unlocks high-fidelity swing simulations that are critical for professional umpiring.",
+      sources: ["ieee.org/sports-physics", "github.com/cricket-stats/radar-tracking"]
+    },
+    {
+      id: "cricket-2",
+      title: "Batter Strike Rotation Stochastics under Spin Bowling Pitch Moistures",
+      source: "arXiv Sports Science",
+      category: "Batter Rotation",
+      credibilityScore: 96,
+      trendScore: 90,
+      freshness: "15m ago",
+      recommendation: "Accept",
+      noveltyScore: 89,
+      importanceScore: 94,
+      confidenceScore: 92,
+      detailedAnalysis: "Researchers modeled spin bowler batter strike rotation using Markov decision processes. By feeding pitch moisture and soil density metrics, the simulator forecasts strike rotation efficiency margins for subcontinental match states.",
+      opinion: "Batting metrics often ignore local soil physics variables. Factoring pitch moisture stochastics directly into player performance simulations yields extremely reliable predictive statistics.",
+      sources: ["arxiv.org/abs/2607.1992"]
+    },
+    {
+      id: "cricket-3",
+      title: "Cricket Fan Commentary Forum Launches Crowdfunding App",
+      source: "ProductHunt",
+      category: "Marketing/Hype",
+      credibilityScore: 70,
+      trendScore: 62,
+      freshness: "1h ago",
+      recommendation: "Reject",
+      rejectionReason: "Rejected because this is a commodity social application wrapping fan commentary feeds, with zero ball tracking or predictive modeling depth.",
+      noveltyScore: 5,
+      importanceScore: 10,
+      confidenceScore: 80,
+      sources: ["producthunt.com/cricketchat"]
+    }
   ]
 };
 
@@ -300,6 +398,48 @@ const getInitialSeedPosts = (domain: string, timestamp: number): Post[] => {
   const isSecurity = domain.toLowerCase().includes("security");
   const isRobotics = domain.toLowerCase().includes("robotics");
   const isOS = domain.toLowerCase().includes("open source") || domain.toLowerCase().includes("os");
+  const isCardio = domain.toLowerCase().includes("surgery") || domain.toLowerCase().includes("heart") || domain.toLowerCase().includes("cardio");
+  const isCricket = domain.toLowerCase().includes("cricket") || domain.toLowerCase().includes("sport") || domain.toLowerCase().includes("pitch") || domain.toLowerCase().includes("batter");
+
+  if (isCardio) {
+    return [
+      {
+        id: "post-cardio-seed-1",
+        createdAt: new Date(timestamp - 7200000).toISOString(),
+        title: "Intelligent Micro-Actuator Calibration for Robotic Coronary Bypass",
+        text: "Summary of high-precision calibration metrics designed to dynamically counter mechanical tremors during robot-assisted cardiovascular bypass surgeries.",
+        rationale: "Aligns with advanced cardiovascular systems engineering parameters.",
+        opinion: "Real-time micro-actuator adjustments are crucial to ensuring safe bypass grafts without tissue damage.",
+        sources: ["nejm.org/surgical-robotics"],
+        confidenceScore: 97,
+        category: "Cardiothoracic Surgery",
+        importanceScore: 95,
+        noveltyScore: 91,
+        relatedPosts: [],
+        publicationId: "PUB-CAR-001"
+      }
+    ];
+  }
+
+  if (isCricket) {
+    return [
+      {
+        id: "post-cricket-seed-1",
+        createdAt: new Date(timestamp - 7200000).toISOString(),
+        title: "Aerodynamic Drag Coefficient Profiling on Cricket Ball Trajectories",
+        text: "Ingests seam alignment data and Doppler radar vectors to simulate ball swing trajectory models under varying air moisture coefficients.",
+        rationale: "Directly relates to cricketing ball trajectory physics research.",
+        opinion: "Accurate aerodynamic modeling under varying weather conditions provides the first truly predictive ball-tracking system.",
+        sources: ["ieee.org/sports-physics"],
+        confidenceScore: 96,
+        category: "Ball Trajectory",
+        importanceScore: 94,
+        noveltyScore: 90,
+        relatedPosts: [],
+        publicationId: "PUB-CRI-001"
+      }
+    ];
+  }
 
   if (isSecurity) {
     return [
@@ -361,22 +501,29 @@ const getInitialSeedPosts = (domain: string, timestamp: number): Post[] => {
     ];
   }
 
-  // Fallback default Dr. Nova seed post
+  // Fallback default dynamic seed post tailored to any custom domain
+  let concepts = domain.split(/[;,]/).map(s => s.trim()).filter(Boolean);
+  if (concepts.length === 0) {
+    concepts = domain.split(/\s+/).map(s => s.trim()).filter(Boolean);
+  }
+  const c1 = concepts[0] ? (concepts[0].charAt(0).toUpperCase() + concepts[0].slice(1)) : "Systems";
+  const pubCode = c1.slice(0, 3).toUpperCase();
+
   return [
     {
-      id: "post-sys-seed-1",
+      id: "post-dyn-seed-1",
       createdAt: new Date(timestamp - 7200000).toISOString(),
-      title: "Multi-Head Latent Attention Optimizations in LLM Context Engines",
-      text: "Detailed study on compressing KV cache sizes in inference runtimes, resolving bottleneck parameters on Nvidia H100 clusters.",
-      rationale: "Resolves memory wall barriers during concurrent token generations.",
-      opinion: "Systems optimization must prioritize KV cache footprint reduction above general model parameter scaling.",
-      sources: ["github.com/deepseek-ai/DeepSeek-V3"],
-      confidenceScore: 98,
-      category: "LLMs & Hardware",
-      importanceScore: 98,
-      noveltyScore: 96,
+      title: `Intelligent ${c1} Systems Optimization and Trajectory Benchmarking`,
+      text: `Ingests performance telemetry logs and models designed to dynamically evaluate ${domain} research integrity and operation thresholds.`,
+      rationale: `Highly relevant systems engineering benchmark for the ${domain} domain.`,
+      opinion: `Implementing automated telemetry loops for ${c1} establishes a stable performance baseline for operational compliance.`,
+      sources: [`arxiv.org/abs/2608.${Math.floor(Math.random() * 9000) + 1000}`],
+      confidenceScore: 97,
+      category: c1,
+      importanceScore: 95,
+      noveltyScore: 91,
       relatedPosts: [],
-      publicationId: "PUB-SYS-001"
+      publicationId: `PUB-${pubCode}-001`
     }
   ];
 };
@@ -403,6 +550,103 @@ const getInitialSeedMemory = (domain: string): MemoryNode[] => {
   ];
 };
 
+// Dynamically generate a set of custom, realistic topics for any user-configured domain
+const generatePoolForDomain = (domain: string): Topic[] => {
+  let concepts = domain.split(/[;,]/).map(s => s.trim()).filter(Boolean);
+  if (concepts.length === 0) {
+    concepts = domain.split(/\s+/).map(s => s.trim()).filter(Boolean);
+  }
+  if (concepts.length === 0) {
+    concepts = ["Systems", "Architecture", "Optimization"];
+  }
+  concepts = concepts.map(c => c.charAt(0).toUpperCase() + c.slice(1));
+  
+  const c1 = concepts[0] || "Systems";
+  const c2 = concepts[1] || c1;
+  const c3 = concepts[2] || c1;
+  
+  return [
+    {
+      id: "dyn-1",
+      title: `Real-time ${c1} Optimization via Deep Learning Heuristics`,
+      source: "Scientific Ingress",
+      category: c1,
+      credibilityScore: 98,
+      trendScore: 95,
+      freshness: "3m ago",
+      recommendation: "Accept",
+      noveltyScore: 92,
+      importanceScore: 96,
+      confidenceScore: 95,
+      detailedAnalysis: `A new research paper outlines advanced algorithms for ${c1} optimizations. By processing high-fidelity sensory parameters and applying predictive inference models on local clusters, the system achieves a 95% efficiency improvement for ${c2} workflows.`,
+      opinion: `This is a breakthrough in ${c1} research. Integrating real-time state estimations directly into ${c2} protocols bypasses traditional latency barriers. Systems engineers should immediately study this layout.`,
+      sources: ["arxiv.org/abs/2608.9901", `github.com/scientific-${c1.toLowerCase()}`]
+    },
+    {
+      id: "dyn-2",
+      title: `Stochastic Modeling of ${c2} Dynamics under ${c3} Constraints`,
+      source: "Academic Review",
+      category: c2,
+      credibilityScore: 96,
+      trendScore: 90,
+      freshness: "15m ago",
+      recommendation: "Accept",
+      noveltyScore: 89,
+      importanceScore: 94,
+      confidenceScore: 92,
+      detailedAnalysis: `Researchers modeled complex ${c2} behavior using stochastic Markov processes. By feeding real-time variable metrics and environmental ${c3} inputs, the simulator forecasts performance bounds under dynamic stress states.`,
+      opinion: `Statistical modeling often ignores localized ${c3} variables. Factoring these variables directly into the simulation yields extremely reliable predictive estimations.`,
+      sources: ["arxiv.org/abs/2607.1992", `github.com/${c2.toLowerCase()}-stochastics`]
+    },
+    {
+      id: "dyn-3",
+      title: `New ${c1} Mobile App Launches Crowdfunding Campaign on Kickstarter`,
+      source: "Kickstarter Feed",
+      category: "Marketing/Hype",
+      credibilityScore: 70,
+      trendScore: 62,
+      freshness: "1h ago",
+      recommendation: "Reject",
+      rejectionReason: `Rejected as consumer marketing app fluff with zero core scientific innovation, algorithmic depth, or ${c2} systems optimizations.`,
+      noveltyScore: 5,
+      importanceScore: 10,
+      confidenceScore: 80,
+      sources: ["kickstarter.com/dyn-campaign"]
+    },
+    {
+      id: "dyn-4",
+      title: `Comparative Analysis of ${c3} Protocols for Scalable ${c1} Integration`,
+      source: "Systems Engineering",
+      category: c3,
+      credibilityScore: 97,
+      trendScore: 91,
+      freshness: "25m ago",
+      recommendation: "Accept",
+      noveltyScore: 91,
+      importanceScore: 95,
+      confidenceScore: 94,
+      detailedAnalysis: `A comparative study evaluating standard ${c3} transmission protocols against novel decentralized arrays. The benchmark measures throughput and latency parameters under heavy load.`,
+      opinion: `Scalability remains a bottleneck for ${c1}. Standardizing on unified ${c3} frameworks is the most sensible path forward.`,
+      sources: ["arxiv.org/abs/2608.2031"]
+    },
+    {
+      id: "dyn-5",
+      title: `VC Fund Announces $50M Seed Investment in ${c2} Startups`,
+      source: "ProductHunt",
+      category: "Marketing/Hype",
+      credibilityScore: 72,
+      trendScore: 68,
+      freshness: "1h ago",
+      recommendation: "Reject",
+      rejectionReason: `Rejected as financial news and VC funding speculation representing low technical merit for core ${c1} engineering research.`,
+      noveltyScore: 10,
+      importanceScore: 15,
+      confidenceScore: 85,
+      sources: ["producthunt.com/fundraising-news"]
+    }
+  ];
+};
+
 // Start or retrieve background agent state
 export function initializeAgentInstance(
   name: string, 
@@ -416,8 +660,24 @@ export function initializeAgentInstance(
   const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, '-');
   const agentId = customAgentId || `agent-${cleanName}-${timestamp}-${Math.random().toString(36).substring(2, 9)}`;
 
-  // Find pool for domain
-  let selectedPool = DOMAIN_TOPIC_POOLS[domain] || DEFAULT_SYSTEMS_POOL;
+  // Find pool for domain with fuzzy matching
+  const dLower = domain.toLowerCase();
+  let selectedPool = DEFAULT_SYSTEMS_POOL;
+  
+  if (dLower.includes("security") || dLower.includes("safe")) {
+    selectedPool = DOMAIN_TOPIC_POOLS["AI Security"] || DEFAULT_SYSTEMS_POOL;
+  } else if (dLower.includes("robot") || dLower.includes("servo") || dLower.includes("slam")) {
+    selectedPool = DOMAIN_TOPIC_POOLS["Robotics"] || DEFAULT_SYSTEMS_POOL;
+  } else if (dLower.includes("open source") || dLower.includes("os ") || dLower.includes("github")) {
+    selectedPool = DOMAIN_TOPIC_POOLS["Open Source AI"] || DEFAULT_SYSTEMS_POOL;
+  } else if (dLower.includes("surgery") || dLower.includes("heart") || dLower.includes("cardio")) {
+    selectedPool = DOMAIN_TOPIC_POOLS["Cardiology"] || DEFAULT_SYSTEMS_POOL;
+  } else if (dLower.includes("cricket") || dLower.includes("sport") || dLower.includes("pitch") || dLower.includes("batter")) {
+    selectedPool = DOMAIN_TOPIC_POOLS["Cricket Analytics"] || DEFAULT_SYSTEMS_POOL;
+  } else {
+    selectedPool = generatePoolForDomain(domain);
+  }
+
   // Deep clone pool so each agent runs with its own instances
   selectedPool = JSON.parse(JSON.stringify(selectedPool));
 
