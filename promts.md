@@ -1620,3 +1620,183 @@ It continuously improves without any human prompts.
 
 The dashboard should feel like watching an autonomous AI analyst perform real editorial work in real time rather than monitoring a backend server.
 
+## Prompt 5
+The application currently throws the following React error:
+
+"Encountered two children with the same key."
+
+This indicates duplicate React keys while rendering lists.
+
+DO NOT redesign the UI.
+
+DO NOT modify the styling.
+
+DO NOT remove any functionality.
+
+ONLY fix the underlying React issue while preserving all current behavior.
+
+====================================================
+TASK
+====================================================
+
+Inspect the entire project for every React list rendering.
+
+Search for every occurrence of:
+
+key=
+
+.map(...)
+
+Array rendering
+
+Feed rendering
+
+Editorial rendering
+
+Discovery Queue
+
+Knowledge Memory
+
+Recent Publications
+
+Rejected Topics
+
+Pipeline
+
+Timeline
+
+Any dynamic component.
+
+====================================================
+FIND THE ROOT CAUSE
+====================================================
+
+The duplicate key is likely caused by one of the following:
+
+• Duplicate IDs in mock JSON data
+• Multiple objects sharing the same id
+• Using Date.now() repeatedly while creating multiple posts
+• Using timestamps as IDs
+• Using array indexes incorrectly
+• Cloning objects without regenerating IDs
+
+Locate the exact source.
+
+====================================================
+FIX REQUIREMENTS
+====================================================
+
+Every rendered object must have a guaranteed unique id.
+
+Replace any unsafe ID generation.
+
+DO NOT use:
+
+id = Date.now()
+
+id = timestamp
+
+id = post-${Date.now()}
+
+or any timestamp-only IDs.
+
+Instead use:
+
+crypto.randomUUID()
+
+or
+
+a stable UUID generator.
+
+If crypto.randomUUID() is unavailable, create IDs using:
+
+timestamp + random suffix
+
+Example
+
+post-${Date.now()}-${Math.random().toString(36).substring(2,9)}
+
+====================================================
+MOCK DATA
+====================================================
+
+Inspect all mock JSON files.
+
+Ensure every object has a unique id.
+
+No duplicate:
+
+post ids
+
+topic ids
+
+publication ids
+
+memory ids
+
+editorial decision ids
+
+queue ids
+
+timeline ids
+
+====================================================
+REACT KEYS
+====================================================
+
+Every list rendered with map() must use:
+
+key={item.id}
+
+where item.id is guaranteed unique.
+
+Do NOT use:
+
+key={index}
+
+unless absolutely unavoidable.
+
+Do NOT use duplicated timestamps.
+
+====================================================
+STATE
+====================================================
+
+If new posts are generated dynamically,
+
+ensure every generated object receives a fresh UUID.
+
+Never reuse previous IDs.
+
+====================================================
+OPTIONAL SAFETY CHECK
+====================================================
+
+Before inserting new posts into state,
+
+check whether an identical ID already exists.
+
+If it exists,
+
+generate a new UUID.
+
+====================================================
+FINAL RESULT
+====================================================
+
+The application should run without any
+
+"Encountered two children with the same key"
+
+warnings.
+
+No duplicate React keys.
+
+No duplicate IDs.
+
+All dynamic lists should render correctly while preserving the existing dashboard, autonomous feed, editorial decisions, discovery queue, and knowledge memory.
+
+Do not modify the UI.
+
+Only fix the underlying React data and rendering issue.
+
