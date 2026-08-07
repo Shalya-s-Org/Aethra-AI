@@ -1,19 +1,37 @@
 "use client";
 
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, Brain, Database, Eye, Terminal, ArrowRight, Zap, RefreshCw, Cpu, Layers } from 'lucide-react';
 import { ParticleBackground } from './ParticleBackground';
 import { WorkflowIllustration } from './WorkflowIllustration';
 import { GlowButton } from '../ui/GlowButton';
 import { GlassCard } from '../ui/GlassCard';
 import { useAgent } from '../../context/AgentContext';
+import { cn } from '../../utils/cn';
 
 interface LandingPageProps {
   onStartInit: () => void;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onStartInit }) => {
+  const [activeStageIdx, setActiveStageIdx] = useState(0);
+  
+  React.useEffect(() => {
+    const stageInterval = setInterval(() => {
+      setActiveStageIdx(prev => (prev + 1) % 5);
+    }, 2800);
+    return () => clearInterval(stageInterval);
+  }, []);
+
+  const animationStages = [
+    { title: "Discover", desc: "Ingesting live code commits, research papers, and technical blogs 24/7", color: "text-blue-400 border-blue-500/20" },
+    { title: "Reason", desc: "Applying strict credibility, novelty, and systems architecture metrics", color: "text-purple-400 border-purple-500/20" },
+    { title: "Remember", desc: "Deduplicating topics against long-term vector database memory", color: "text-cyan-400 border-cyan-500/20" },
+    { title: "Publish", desc: "Writing and broadcasting technical architecture review blocks", color: "text-emerald-400 border-emerald-500/20" },
+    { title: "Learn", desc: "Updating vector networks and committing node paths to the memory graph", color: "text-pink-400 border-pink-500/20" }
+  ];
+
   return (
     <div className="relative min-h-screen w-full overflow-hidden bg-cyber-bg cyber-grid">
       <ParticleBackground />
@@ -51,24 +69,65 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartInit }) => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1, duration: 0.8 }}
-          className="font-display text-4xl md:text-6xl font-black text-white tracking-tight leading-none mb-6 uppercase"
+          className="font-display text-5xl md:text-7xl font-black text-white tracking-tight leading-none mb-4 uppercase"
         >
-          The Autonomous <br />
-          <span className="bg-gradient-to-r from-cyber-cyan via-cyber-purple to-cyber-emerald bg-clip-text text-transparent filter drop-shadow-[0_0_30px_rgba(0,240,255,0.2)]">
-            AI Technology Analyst
-          </span>
+          AETHRA AI
         </motion.h1>
+
+        <motion.h2
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.8 }}
+          className="font-display text-base md:text-xl font-bold tracking-widest text-cyber-cyan uppercase mb-6"
+        >
+          The Autonomous Editorial Intelligence System
+        </motion.h2>
 
         <motion.p
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.3, duration: 0.8 }}
-          className="max-w-2xl mx-auto text-sm md:text-base text-gray-400 font-sans font-light leading-relaxed mb-10"
+          className="max-w-2xl mx-auto text-sm text-gray-400 font-sans font-light leading-relaxed mb-8"
         >
           Meet AETHRA AI (Dr. Nova), a digital AI architect that monitors the tech ecosystem 24/7. 
           Unlike typical chatbots, it independently discovers engineering breakthroughs, filters marketing noise, 
           queries its vector memory, and publishes detailed architectural reviews without human prompts.
         </motion.p>
+
+        {/* Dynamic In-One Animation explaining the flow */}
+        <div className="max-w-xl mx-auto mb-10 p-4 border border-white/5 bg-black/45 rounded-xl text-center">
+          <div className="flex justify-between items-center gap-2 mb-4 font-mono text-[9px] text-gray-500 uppercase tracking-widest">
+            {animationStages.map((stage, idx) => (
+              <React.Fragment key={idx}>
+                <div className={cn(
+                  "px-2 py-1.5 rounded transition-all duration-300",
+                  activeStageIdx === idx && "bg-white/5 border border-white/10 text-white font-bold scale-105"
+                )}>
+                  {stage.title}
+                </div>
+                {idx < 4 && <span>&rarr;</span>}
+              </React.Fragment>
+            ))}
+          </div>
+
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeStageIdx}
+              initial={{ opacity: 0, y: 5 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -5 }}
+              transition={{ duration: 0.25 }}
+              className="space-y-1 font-mono"
+            >
+              <div className={cn("text-xs font-bold uppercase", animationStages[activeStageIdx].color)}>
+                {activeStageIdx + 1}. {animationStages[activeStageIdx].title} Phase
+              </div>
+              <p className="text-[10px] text-gray-400 max-w-sm mx-auto leading-relaxed">
+                {animationStages[activeStageIdx].desc}
+              </p>
+            </motion.div>
+          </AnimatePresence>
+        </div>
 
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
@@ -77,7 +136,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartInit }) => {
           className="flex flex-wrap justify-center gap-4"
         >
           <GlowButton variant="cyan" className="px-8 py-3 text-sm" onClick={onStartInit}>
-            Initialize Dr. Nova
+            Initialize Agent
           </GlowButton>
           <a href="#how-it-works">
             <GlowButton variant="ghost" className="px-8 py-3 text-sm">
