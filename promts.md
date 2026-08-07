@@ -1620,3 +1620,11 @@ It continuously improves without any human prompts.
 
 The dashboard should feel like watching an autonomous AI analyst perform real editorial work in real time rather than monitoring a backend server.
 
+
+
+## Prompt 5
+I want you to put every prompt i give you from now on in c:\Users\shaly\Documents\GitHub\Aethra-AI\promts.md
+
+## Prompt 6
+I want to deploy it on vercel
+

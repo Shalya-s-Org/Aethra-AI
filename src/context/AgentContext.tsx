@@ -27,6 +27,7 @@ interface AgentContextType {
   // Config
   config: AgentConfig;
   isInitialized: boolean;
+  agentId: string;
   initializeAgent: (config: AgentConfig) => void;
   resetAgent: () => void;
   
@@ -80,6 +81,7 @@ const INITIAL_REJECTED_TODAY = [
 export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [config, setConfig] = useState<AgentConfig>(DEFAULT_CONFIG);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
+  const [agentId, setAgentId] = useState<string>("");
   const [status, setStatus] = useState<AgentStatus>('inactive');
   const [currentActionDetails, setCurrentActionDetails] = useState<string>("Agent offline. Initialize agent parameters to activate.");
   const [countdown, setCountdown] = useState<number>(30); // Demo interval trigger
@@ -288,8 +290,9 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       if (currentTopic.recommendation === 'Accept') {
         const pubId = `PUB-${new Date().getFullYear()}-${String(posts.length + 1).padStart(3, '0')}`;
+        const randSuffix = Math.floor(Math.random() * 10000);
         const newPost: Post = {
-          id: `post-${Date.now()}`,
+          id: `post-${Date.now()}-${randSuffix}`,
           createdAt: new Date().toISOString(),
           title: currentTopic.title,
           text: currentTopic.detailedAnalysis || "Technical analysis in progress...",
@@ -307,8 +310,8 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setPosts(prev => [newPost, ...prev]);
 
         // Create specific graph connections to represent OpenAI -> GPT-5 -> Reasoning -> MCP -> RAG -> Security -> Inference
-        const nodeTopicId = `mem-${Date.now()}-topic`;
-        const nodeOpinionId = `mem-${Date.now()}-opinion`;
+        const nodeTopicId = `mem-${Date.now()}-${randSuffix}-topic`;
+        const nodeOpinionId = `mem-${Date.now()}-${randSuffix}-opinion`;
 
         const newNodes: MemoryNode[] = [
           {
@@ -377,6 +380,9 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const initializeAgent = (newConfig: AgentConfig) => {
     setConfig(newConfig);
+    const cleanName = newConfig.name.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    const generatedAgentId = `agent-${cleanName}-${Date.now()}`;
+    setAgentId(generatedAgentId);
     setIsInitialized(true);
     setStatus('idle');
     setCurrentActionDetails("Dr. Nova has initialized core heuristics. Activating autonomous sensors...");
@@ -385,6 +391,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const resetAgent = () => {
     setIsInitialized(false);
+    setAgentId("");
     setStatus('inactive');
     setCurrentActionDetails("Agent offline. Initialize agent parameters to activate.");
     setCountdown(30);
@@ -413,6 +420,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     <AgentContext.Provider value={{
       config,
       isInitialized,
+      agentId,
       initializeAgent,
       resetAgent,
       status,

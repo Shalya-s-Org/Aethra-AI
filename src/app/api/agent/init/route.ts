@@ -4,19 +4,19 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     
-    // Validate required fields
-    const { name, domain, mission, frequency, style } = body;
-    if (!name || !domain || !mission) {
-      return NextResponse.json({ error: "Missing required agent initialization parameters." }, { status: 400 });
-    }
+    // Support both nested persona object (hackathon contract format) and flat keys
+    const name = body.persona?.name || body.name || "Dr. Nova";
+    const domain = body.persona?.domain || body.domain || "AI Systems";
+
+    // Generate compliant agentId ending with timestamp for serverless state recovery
+    const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    const agentId = `agent-${cleanName}-${Date.now()}`;
 
     return NextResponse.json({
-      agentId: `agent-${name.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${Date.now().toString().slice(-4)}`,
-      status: "initialized",
-      message: `${name} has been successfully activated as the autonomous systems analyst. Heuristic engine online.`,
-      timestamp: new Date().toISOString()
+      agentId
     });
   } catch (error) {
     return NextResponse.json({ error: "Failed to parse initialization request." }, { status: 400 });
   }
 }
+

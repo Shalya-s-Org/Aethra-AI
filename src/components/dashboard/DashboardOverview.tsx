@@ -53,6 +53,19 @@ export const DashboardOverview: React.FC = () => {
     }
   }, [status]);
 
+  // Helper to determine if a decision flow block is active
+  const isFlowActive = (blockName: string) => {
+    switch (blockName) {
+      case 'scanning': return status === 'scanning';
+      case 'filtering': return status === 'filtering';
+      case 'reasoning': return status === 'reasoning';
+      case 'writing': return status === 'writing' || status === 'memory_check';
+      case 'publishing': return status === 'publishing';
+      case 'learning': return status === 'learning';
+      default: return false;
+    }
+  };
+
   // Top metrics
   const editorialMetrics = useMemo(() => {
     return [
@@ -340,7 +353,7 @@ export const DashboardOverview: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {editorialMetrics.map((met, idx) => (
           <GlassCard 
-            key={idx} 
+            key={met.title} 
             className="p-4 flex items-center gap-4 border-white/5 bg-white/1 transform hover:translate-y-[-2px] hover:shadow-[0_0_20px_rgba(0,240,255,0.05)] transition-all duration-300" 
             glowColor={met.glow}
           >
@@ -369,37 +382,67 @@ export const DashboardOverview: React.FC = () => {
         </h4>
         
         <div className="flex flex-col md:flex-row items-center justify-between gap-3 text-center md:text-left">
-          <div className="p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5">
+          <div className={cn(
+            "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
+            isFlowActive('scanning') 
+              ? "bg-blue-500/10 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.2)] scale-105 animate-pulse"
+              : "bg-black/40 border-white/5 opacity-70"
+          )}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Topics Found</div>
-            <div className="font-display text-sm font-bold text-blue-400 mt-0.5">89</div>
+            <div className="font-display text-sm font-bold text-blue-400 mt-0.5">{pipelineStats.scanCount}</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
-          <div className="p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5">
+          <div className={cn(
+            "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
+            isFlowActive('filtering') 
+              ? "bg-red-500/10 border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.2)] scale-105 animate-pulse"
+              : "bg-black/40 border-white/5 opacity-70"
+          )}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Rejected</div>
-            <div className="font-display text-sm font-bold text-red-400 mt-0.5">61</div>
+            <div className="font-display text-sm font-bold text-red-400 mt-0.5">{pipelineStats.filterCount}</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
-          <div className="p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5">
+          <div className={cn(
+            "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
+            isFlowActive('reasoning') 
+              ? "bg-yellow-500/10 border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.2)] scale-105 animate-pulse"
+              : "bg-black/40 border-white/5 opacity-70"
+          )}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Investigating</div>
-            <div className="font-display text-sm font-bold text-yellow-400 mt-0.5">18</div>
+            <div className="font-display text-sm font-bold text-yellow-400 mt-0.5">{pipelineStats.reasonCount}</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
-          <div className="p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5 animate-pulse">
+          <div className={cn(
+            "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
+            isFlowActive('writing') 
+              ? "bg-purple-500/10 border-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.2)] scale-105 animate-pulse"
+              : "bg-black/40 border-white/5 opacity-70"
+          )}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Selected</div>
-            <div className="font-display text-sm font-bold text-cyber-purple mt-0.5">6</div>
+            <div className="font-display text-sm font-bold text-cyber-purple mt-0.5">{pipelineStats.writeCount}</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
-          <div className="p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5">
+          <div className={cn(
+            "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
+            isFlowActive('publishing') 
+              ? "bg-emerald-500/10 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.2)] scale-105 animate-pulse"
+              : "bg-black/40 border-white/5 opacity-70"
+          )}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Publishing</div>
-            <div className="font-display text-sm font-bold text-cyber-emerald mt-0.5">2</div>
+            <div className="font-display text-sm font-bold text-cyber-emerald mt-0.5">{pipelineStats.publishCount}</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
-          <div className="p-3 rounded border w-full md:w-auto md:flex-1 bg-black/40 border-white/5">
+          <div className={cn(
+            "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
+            isFlowActive('learning') 
+              ? "bg-pink-500/10 border-pink-500/50 shadow-[0_0_15px_rgba(236,72,153,0.2)] scale-105 animate-pulse"
+              : "bg-black/40 border-white/5 opacity-70"
+          )}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Learning</div>
             <div className="font-display text-[9px] font-bold text-pink-400 mt-1 uppercase tracking-wider">Memory Updated</div>
           </div>
@@ -411,9 +454,10 @@ export const DashboardOverview: React.FC = () => {
 
       {/* 5. Main Content Grid (3 Columns layout) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Column 1: Candidate Topic Queue (8-10 topics) */}
+        {/* Column 1: Topic Queues and Rejected Logs */}
         <div className="lg:col-span-1 space-y-4">
-          <GlassCard className="p-5 flex flex-col h-full justify-between" glowColor="cyan">
+          {/* Candidate Topic Queue */}
+          <GlassCard className="p-5" glowColor="cyan">
             <div>
               <div className="mb-4">
                 <h4 className="font-display text-xs font-bold tracking-wider text-white uppercase flex items-center gap-1.5">
@@ -425,7 +469,7 @@ export const DashboardOverview: React.FC = () => {
                 </p>
               </div>
 
-              <div className="space-y-2.5 max-h-[580px] overflow-y-auto pr-1">
+              <div className="space-y-2.5 max-h-[280px] overflow-y-auto pr-1">
                 {candidateTopics.map((cand) => (
                   <div key={cand.id} className="p-3 rounded bg-black/40 border border-white/5 text-[10px] space-y-2">
                     <div className="flex justify-between items-start gap-2">
@@ -454,6 +498,39 @@ export const DashboardOverview: React.FC = () => {
                         {cand.rejectionReason}
                       </p>
                     )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </GlassCard>
+
+          {/* Rejected Topics Today */}
+          <GlassCard className="p-5" glowColor="none">
+            <div>
+              <div className="mb-4">
+                <h4 className="font-display text-xs font-bold tracking-wider text-white uppercase flex items-center gap-1.5">
+                  <ShieldAlert className="w-4 h-4 text-red-400" />
+                  Rejected Topics Today
+                </h4>
+                <p className="text-[8px] text-gray-500 uppercase tracking-widest font-mono mt-0.5">
+                  Filtered due to editorial policy thresholds
+                </p>
+              </div>
+
+              <div className="space-y-2.5 max-h-[250px] overflow-y-auto pr-1">
+                {rejectedTodayList.map((rej, idx) => (
+                  <div key={`rej-${idx}-${rej.title.slice(0, 10)}`} className="p-3 rounded bg-black/40 border border-red-500/10 text-[9px] space-y-2">
+                    <div className="flex justify-between items-start gap-1">
+                      <span className="font-display font-medium text-white leading-relaxed">
+                        {rej.title}
+                      </span>
+                      <span className="px-1.5 py-0.2 rounded text-[7px] font-mono uppercase bg-red-500/10 text-red-400 border border-red-500/20 flex-shrink-0">
+                        Rejected
+                      </span>
+                    </div>
+                    <p className="text-[8.5px] text-red-400 leading-normal pl-2 border-l border-red-500/30">
+                      {rej.reason}
+                    </p>
                   </div>
                 ))}
               </div>
