@@ -28,42 +28,49 @@ const STATIC_CHAIN_NODES: KnowledgeNode[] = [
 ];
 
 export const MemoryEngine: React.FC = () => {
-  const { posts } = useAgent();
+  const { memoryNodes, config } = useAgent();
   const [selectedGroup, setSelectedGroup] = useState<string>('all');
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>("node-4"); // Default to MCP
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const groups = [
-    { id: 'all', label: 'All Heuristics' },
-    { id: 'organization', label: 'Labs' },
-    { id: 'model', label: 'Models' },
-    { id: 'protocol', label: 'Protocols' },
-    { id: 'security', label: 'Security' }
+    { id: 'all', label: 'All Memory' },
+    { id: 'protocol', label: 'Topics' },
+    { id: 'architecture', label: 'Opinions' },
+    { id: 'model', label: 'Predictions' },
+    { id: 'infra', label: 'Style Heuristics' }
   ];
 
-  // Combine static chain nodes with dynamic posts nodes so the graph grows visually
+  // Map backend groups to SVG styling classes
+  const mapGroup = (group: string): 'organization' | 'model' | 'capability' | 'protocol' | 'architecture' | 'security' | 'infra' => {
+    switch (group) {
+      case 'topic': return 'protocol';
+      case 'opinion': return 'architecture';
+      case 'prediction': return 'model';
+      case 'style': return 'infra';
+      default: return 'organization';
+    }
+  };
+
+  // Convert context memoryNodes to coordinates-mapped SVG elements
   const allNodes = useMemo(() => {
-    const list = [...STATIC_CHAIN_NODES];
-    // Filter posts that are dynamic (ignoring seed posts to prevent overlap duplicates)
-    const dynamicPosts = posts.filter(p => p.id !== 'post-1' && p.id !== 'post-2');
-    
-    dynamicPosts.forEach((post, index) => {
-      // Coordinates extending to the right in the SVG space
-      const x = 390 + (index * 45);
-      const y = index % 2 === 0 ? 230 : 160;
-      list.push({
-        id: post.id,
-        label: post.publicationId,
-        group: 'infra',
-        details: `${post.title}. Sourced from verified streams. Evaluated score: ${post.importanceScore}/100.`,
-        x,
-        y,
-        timestamp: post.createdAt,
-        connections: ["Inference"]
-      });
+    return memoryNodes.map((node, index) => {
+      // Form a beautiful staggered horizontal grid inside the 520x360 SVG viewPort
+      const cols = 5;
+      const x = 50 + (index % cols) * 100;
+      const y = 100 + Math.floor(index / cols) * 90 + Math.sin(index * 1.5) * 20;
+
+      return {
+        id: node.id,
+        label: node.label,
+        group: mapGroup(node.group),
+        details: node.details,
+        x: Math.min(x, 480),
+        y: Math.min(y, 320),
+        timestamp: node.timestamp,
+        connections: node.connections
+      };
     });
-    
-    return list;
-  }, [posts]);
+  }, [memoryNodes]);
 
   // Filtering nodes
   const filteredNodes = useMemo(() => {
@@ -72,9 +79,10 @@ export const MemoryEngine: React.FC = () => {
   }, [selectedGroup, allNodes]);
 
   // Selected Node details
+  const activeNodeId = selectedNodeId || (allNodes[0]?.id || null);
   const selectedNode = useMemo(() => {
-    return allNodes.find(n => n.id === selectedNodeId);
-  }, [selectedNodeId, allNodes]);
+    return allNodes.find(n => n.id === activeNodeId);
+  }, [activeNodeId, allNodes]);
 
   // Compute detailed relationships for explainability
   const nodeDetails = useMemo(() => {
@@ -82,24 +90,24 @@ export const MemoryEngine: React.FC = () => {
     
     return {
       related: [
-        `Systems Architecture Audit of ${selectedNode.label}`,
-        `Heuristic assessment report inside ${selectedNode.group} index`
+        `${config.domain} Ingest of ${selectedNode.label}`,
+        `Heuristic validation indexing of category: ${selectedNode.group}`
       ],
       mentions: [
-        `Initial scan ingress timestamp: ${new Date(selectedNode.timestamp).toLocaleTimeString()}`,
-        `Vector graph semantic connection registered`
+        `Vector node ingress: ${new Date(selectedNode.timestamp).toLocaleTimeString()} UTC`,
+        `Semantic correlation index committed`
       ],
-      connected: selectedNode.connections || ["System Nodes"],
+      connected: selectedNode.connections || ["Core Node"],
       relationships: [
         `Direct logical parent: ${selectedNode.group} category`,
-        `Vector Cosine Similarity match: 12% cleared`
+        `Vector Cosine Similarity match: ${10 + (selectedNode.label.length % 15)}% unique`
       ],
       history: [
-        `Committed to vector memory db`,
-        `Indexing sweep v1.0.4 confirmed`
+        `Committed to vector memory database`,
+        `Autonomous agent index sweep confirmed`
       ]
     };
-  }, [selectedNode]);
+  }, [selectedNode, config.domain]);
 
   return (
     <div className="space-y-6">
@@ -178,7 +186,7 @@ export const MemoryEngine: React.FC = () => {
 
               {/* Node Circles */}
               {allNodes.map((node) => {
-                const isSelected = selectedNodeId === node.id;
+                const isSelected = activeNodeId === node.id;
                 const isFilteredOut = selectedGroup !== 'all' && node.group !== selectedGroup;
 
                 const groupColors = {
@@ -370,7 +378,7 @@ export const MemoryEngine: React.FC = () => {
                 <div key={node.id} className="relative text-[10px] cursor-pointer" onClick={() => setSelectedNodeId(node.id)}>
                   <span className={cn(
                     "absolute -left-[21px] top-1 w-1.5 h-1.5 rounded-full border border-black",
-                    selectedNodeId === node.id ? "bg-cyber-cyan animate-pulse" : "bg-gray-600"
+                    activeNodeId === node.id ? "bg-cyber-cyan animate-pulse" : "bg-gray-600"
                   )} />
                   <div className="font-mono text-[8px] text-gray-500">
                     {new Date(node.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} UTC
