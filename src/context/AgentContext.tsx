@@ -3,6 +3,15 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { Topic, Post, MemoryNode, initialTopics, initialPosts, initialMemory } from '../data/mockTopics';
 
+// Helper function to generate guaranteed unique IDs
+const generateUUID = (prefix: string): string => {
+  if (typeof window !== 'undefined' && window.crypto && typeof window.crypto.randomUUID === 'function') {
+    return `${prefix}-${window.crypto.randomUUID()}`;
+  }
+  const randomSuffix = Math.random().toString(36).substring(2, 9);
+  return `${prefix}-${Date.now()}-${randomSuffix}`;
+};
+
 export type AgentStatus = 'inactive' | 'idle' | 'scanning' | 'filtering' | 'reasoning' | 'memory_check' | 'writing' | 'publishing' | 'learning';
 
 export interface AgentConfig {
@@ -188,7 +197,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (unprocessedPool.current.length === 0) {
       unprocessedPool.current = [...initialTopics].map(t => ({
         ...t,
-        id: `topic-${t.id}-${Date.now()}`
+        id: generateUUID(`topic-${t.id}`)
       }));
     }
 
@@ -280,7 +289,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Apply database updates at the end of loop
     setTimeout(() => {
       setStatus('idle');
-      setCurrentActionDetails(`System monitoring streams. Next scan cycle in ${countdown}s.`);
+      setCurrentActionDetails("System monitoring streams. Next scan cycle in 30s.");
       setActiveTopic(null);
       setPipelineProgress(0);
       setMissionProgress(0);
@@ -290,9 +299,15 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       if (currentTopic.recommendation === 'Accept') {
         const pubId = `PUB-${new Date().getFullYear()}-${String(posts.length + 1).padStart(3, '0')}`;
-        const randSuffix = Math.floor(Math.random() * 10000);
+        
+        let newPostId = generateUUID('post');
+        // Optional safety check: check whether an identical ID already exists, regenerate if so
+        while (posts.some(p => p.id === newPostId)) {
+          newPostId = generateUUID('post');
+        }
+
         const newPost: Post = {
-          id: `post-${Date.now()}-${randSuffix}`,
+          id: newPostId,
           createdAt: new Date().toISOString(),
           title: currentTopic.title,
           text: currentTopic.detailedAnalysis || "Technical analysis in progress...",
@@ -310,8 +325,8 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setPosts(prev => [newPost, ...prev]);
 
         // Create specific graph connections to represent OpenAI -> GPT-5 -> Reasoning -> MCP -> RAG -> Security -> Inference
-        const nodeTopicId = `mem-${Date.now()}-${randSuffix}-topic`;
-        const nodeOpinionId = `mem-${Date.now()}-${randSuffix}-opinion`;
+        const nodeTopicId = generateUUID('mem-topic');
+        const nodeOpinionId = generateUUID('mem-opinion');
 
         const newNodes: MemoryNode[] = [
           {
@@ -338,7 +353,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setCountdown(30);
     }, cumulativeTime);
 
-  }, [posts.length, countdown]);
+  }, [posts.length]);
 
   // Timers: Runs every second
   useEffect(() => {
@@ -346,6 +361,9 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // Tick countdown to scan
     countdownTimerRef.current = setInterval(() => {
+      // Pause countdown ticks if Dr. Nova is actively auditing/writing/publishing
+      if (status !== 'idle') return;
+
       setCountdown(prev => {
         if (prev <= 1) {
           runAutonomousStep();
@@ -368,7 +386,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
       if (telemetryTimerRef.current) clearInterval(telemetryTimerRef.current);
     };
-  }, [isInitialized, runAutonomousStep]);
+  }, [isInitialized, status, runAutonomousStep]);
 
   // Helper formatting for seconds to 01h 24m 17s
   const nextPublishCountdown = React.useMemo(() => {
