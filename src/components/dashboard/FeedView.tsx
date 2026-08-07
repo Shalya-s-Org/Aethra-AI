@@ -9,7 +9,7 @@ import { cn } from '../../utils/cn';
 import { Post } from '../../data/mockTopics';
 
 export const FeedView: React.FC = () => {
-  const { posts } = useAgent();
+  const { posts, config } = useAgent();
   const [activePostId, setActivePostId] = useState<string | null>(null);
   const [selectedPostForDrawer, setSelectedPostForDrawer] = useState<Post | null>(null);
 
@@ -158,7 +158,7 @@ export const FeedView: React.FC = () => {
                         <div className="p-2 rounded bg-black/40 border border-white/5 space-y-0.5">
                           <div className="flex justify-between font-bold">
                             <span>Credibility Score:</span>
-                            <span className="text-white">97%</span>
+                            <span className="text-white">{post.confidenceScore || 97}%</span>
                           </div>
                           <p className="text-[7.5px] text-gray-500 leading-normal">
                             Evaluates authority of source streams and commit logs.
@@ -168,7 +168,7 @@ export const FeedView: React.FC = () => {
                         <div className="p-2 rounded bg-black/40 border border-white/5 space-y-0.5">
                           <div className="flex justify-between font-bold">
                             <span>Memory Similarity:</span>
-                            <span className="text-cyber-emerald">12%</span>
+                            <span className="text-cyber-emerald">{10 + ((post.importanceScore + post.noveltyScore) % 15)}%</span>
                           </div>
                           <p className="text-[7.5px] text-gray-500 leading-normal">
                             Quantifies overlap probability with our historical document indices.
@@ -178,7 +178,7 @@ export const FeedView: React.FC = () => {
                         <div className="p-2 rounded bg-black/40 border border-white/5 space-y-0.5">
                           <div className="flex justify-between font-bold">
                             <span>Editorial Policy Match:</span>
-                            <span className="text-cyber-emerald">100%</span>
+                            <span className="text-cyber-emerald">{98 + (post.importanceScore % 3)}%</span>
                           </div>
                           <p className="text-[7.5px] text-gray-500 leading-normal">
                             Verifies conformity to our zero-hype, pure systems engineering criteria.
@@ -188,7 +188,7 @@ export const FeedView: React.FC = () => {
                         <div className="p-2 rounded bg-black/40 border border-white/5 space-y-0.5">
                           <div className="flex justify-between font-bold">
                             <span>Publishing Confidence:</span>
-                            <span className="text-white">96%</span>
+                            <span className="text-white">{post.confidenceScore ? `${post.confidenceScore - 2}%` : "95%"}</span>
                           </div>
                           <p className="text-[7.5px] text-gray-500 leading-normal">
                             Calculated joint likelihood of editorial merit and relevancy.
@@ -279,7 +279,9 @@ export const FeedView: React.FC = () => {
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-500">Duplicate Similarity:</span>
-                          <span className="text-cyber-emerald font-bold">12% (Cleared)</span>
+                          <span className="text-cyber-emerald font-bold">
+                            {10 + ((activePost.importanceScore + activePost.noveltyScore) % 15)}% (Cleared)
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -388,7 +390,7 @@ export const FeedView: React.FC = () => {
 
                     <motion.div variants={itemVariants} className="relative">
                       <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Publishing Confidence:</span> <strong className="text-white">96% score</strong>
+                      <span className="text-gray-500">Publishing Confidence:</span> <strong className="text-white">{selectedPostForDrawer.confidenceScore ? `${selectedPostForDrawer.confidenceScore - 2}%` : "95%"} score</strong>
                     </motion.div>
 
                     <motion.div variants={itemVariants} className="relative font-bold text-cyber-cyan">
@@ -430,7 +432,7 @@ export const FeedView: React.FC = () => {
                       <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
                         <div className="flex justify-between font-bold">
                           <span>Credibility Score:</span>
-                          <span className="text-white">97%</span>
+                          <span className="text-white">{selectedPostForDrawer.confidenceScore || 97}%</span>
                         </div>
                         <p className="text-[8px] text-gray-500 leading-normal">
                           Evaluates the authority of source streams and commit integrity logs.
@@ -440,7 +442,7 @@ export const FeedView: React.FC = () => {
                       <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
                         <div className="flex justify-between font-bold">
                           <span>Memory Similarity:</span>
-                          <span className="text-cyber-emerald">12%</span>
+                          <span className="text-cyber-emerald">{10 + ((selectedPostForDrawer.importanceScore + selectedPostForDrawer.noveltyScore) % 15)}%</span>
                         </div>
                         <p className="text-[8px] text-gray-500 leading-normal">
                           Quantifies overlap probability with our historical document indices.
@@ -450,7 +452,7 @@ export const FeedView: React.FC = () => {
                       <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
                         <div className="flex justify-between font-bold">
                           <span>Editorial Policy Match:</span>
-                          <span className="text-cyber-emerald">100%</span>
+                          <span className="text-cyber-emerald">{98 + (selectedPostForDrawer.importanceScore % 3)}%</span>
                         </div>
                         <p className="text-[8px] text-gray-500 leading-normal">
                           Verifies conformity to our zero-hype, pure systems engineering criteria.
@@ -460,7 +462,7 @@ export const FeedView: React.FC = () => {
                       <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
                         <div className="flex justify-between font-bold">
                           <span>Publishing Confidence:</span>
-                          <span className="text-white">96%</span>
+                          <span className="text-white">{selectedPostForDrawer.confidenceScore ? `${selectedPostForDrawer.confidenceScore - 2}%` : "95%"}</span>
                         </div>
                         <p className="text-[8px] text-gray-500 leading-normal">
                           Calculated joint likelihood of editorial merit and audience relevancy.

@@ -54,9 +54,10 @@ export const EditorialDecisions: React.FC = () => {
               const isAccepted = dec.recommendation === 'Accept';
               
               // Memory match calculations based on acceptance state
-              const memoryMatch = isAccepted 
-                ? `${Math.floor(Math.random() * 15) + 5}%` // Low match is good
-                : dec.category === 'Duplicate' ? '94%' : `${Math.floor(Math.random() * 20) + 15}%`;
+              const matchVal = isAccepted 
+                ? (5 + (dec.importanceScore % 10))
+                : dec.category === 'Duplicate' ? 94 : (15 + (dec.noveltyScore % 15));
+              const memoryMatch = `${matchVal}%`;
 
               return (
                 <div 
