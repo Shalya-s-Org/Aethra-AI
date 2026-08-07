@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { initialPosts } from '../../../../data/mockTopics';
+import { getPostsForAgent } from '../../../../utils/agentStore';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -9,15 +9,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Missing required query parameter: agentId" }, { status: 400 });
   }
 
-  // Map our posts to match exactly the required fields in the hackathon contract:
-  // id, createdAt, text, rationale, sources[]
-  const posts = initialPosts.map(post => ({
-    id: post.id,
-    createdAt: post.createdAt,
-    text: post.text,
-    rationale: post.rationale,
-    sources: post.sources
-  }));
+  // Retrieve deterministic progressive posts based on initialization timestamp encoded in agentId
+  const posts = getPostsForAgent(agentId);
 
-  return NextResponse.json({ posts });
+  // Return newest first
+  const sortedPosts = [...posts].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+
+  return NextResponse.json({ posts: sortedPosts });
 }
+

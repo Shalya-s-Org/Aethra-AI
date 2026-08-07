@@ -36,6 +36,7 @@ interface AgentContextType {
   // Config
   config: AgentConfig;
   isInitialized: boolean;
+  agentId: string;
   initializeAgent: (config: AgentConfig) => void;
   resetAgent: () => void;
   
@@ -89,6 +90,7 @@ const INITIAL_REJECTED_TODAY = [
 export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [config, setConfig] = useState<AgentConfig>(DEFAULT_CONFIG);
   const [isInitialized, setIsInitialized] = useState<boolean>(false);
+  const [agentId, setAgentId] = useState<string>("");
   const [status, setStatus] = useState<AgentStatus>('inactive');
   const [currentActionDetails, setCurrentActionDetails] = useState<string>("Agent offline. Initialize agent parameters to activate.");
   const [countdown, setCountdown] = useState<number>(30); // Demo interval trigger
@@ -396,6 +398,9 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const initializeAgent = (newConfig: AgentConfig) => {
     setConfig(newConfig);
+    const cleanName = newConfig.name.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    const generatedAgentId = `agent-${cleanName}-${Date.now()}`;
+    setAgentId(generatedAgentId);
     setIsInitialized(true);
     setStatus('idle');
     setCurrentActionDetails("Dr. Nova has initialized core heuristics. Activating autonomous sensors...");
@@ -404,6 +409,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const resetAgent = () => {
     setIsInitialized(false);
+    setAgentId("");
     setStatus('inactive');
     setCurrentActionDetails("Agent offline. Initialize agent parameters to activate.");
     setCountdown(30);
@@ -432,6 +438,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     <AgentContext.Provider value={{
       config,
       isInitialized,
+      agentId,
       initializeAgent,
       resetAgent,
       status,

@@ -174,7 +174,7 @@ export const FeedView: React.FC = () => {
                         <span className="text-[8px] font-mono text-gray-500 uppercase tracking-widest mr-2">Verified Sources:</span>
                         {post.sources.map((src, i) => (
                           <span
-                            key={i}
+                            key={`src-${i}-${src}`}
                             className="bg-black/45 border border-white/5 px-2 py-0.5 rounded text-[8px] text-gray-400 font-mono"
                           >
                             {src}

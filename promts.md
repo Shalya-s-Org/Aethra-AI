@@ -1620,6 +1620,7 @@ It continuously improves without any human prompts.
 
 The dashboard should feel like watching an autonomous AI analyst perform real editorial work in real time rather than monitoring a backend server.
 
+
 ## Prompt 5
 The application currently throws the following React error:
 
@@ -1635,9 +1636,7 @@ DO NOT remove any functionality.
 
 ONLY fix the underlying React issue while preserving all current behavior.
 
-====================================================
 TASK
-====================================================
 
 Inspect the entire project for every React list rendering.
 
@@ -1667,9 +1666,7 @@ Timeline
 
 Any dynamic component.
 
-====================================================
 FIND THE ROOT CAUSE
-====================================================
 
 The duplicate key is likely caused by one of the following:
 
@@ -1682,9 +1679,7 @@ The duplicate key is likely caused by one of the following:
 
 Locate the exact source.
 
-====================================================
 FIX REQUIREMENTS
-====================================================
 
 Every rendered object must have a guaranteed unique id.
 
@@ -1716,9 +1711,7 @@ Example
 
 post-${Date.now()}-${Math.random().toString(36).substring(2,9)}
 
-====================================================
 MOCK DATA
-====================================================
 
 Inspect all mock JSON files.
 
@@ -1740,9 +1733,7 @@ queue ids
 
 timeline ids
 
-====================================================
 REACT KEYS
-====================================================
 
 Every list rendered with map() must use:
 
@@ -1758,9 +1749,7 @@ unless absolutely unavoidable.
 
 Do NOT use duplicated timestamps.
 
-====================================================
 STATE
-====================================================
 
 If new posts are generated dynamically,
 
@@ -1768,9 +1757,7 @@ ensure every generated object receives a fresh UUID.
 
 Never reuse previous IDs.
 
-====================================================
 OPTIONAL SAFETY CHECK
-====================================================
 
 Before inserting new posts into state,
 
@@ -1780,9 +1767,7 @@ If it exists,
 
 generate a new UUID.
 
-====================================================
 FINAL RESULT
-====================================================
 
 The application should run without any
 
@@ -1800,3 +1785,5 @@ Do not modify the UI.
 
 Only fix the underlying React data and rendering issue.
 
+## Prompt 6
+I want to deploy it on vercel

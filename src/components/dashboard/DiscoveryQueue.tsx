@@ -200,7 +200,7 @@ export const DiscoveryQueue: React.FC = () => {
                     <div className="space-y-1">
                       {selectedTopic.sources.map((src, i) => (
                         <a
-                          key={i}
+                          key={`src-${i}-${src}`}
                           href={`https://${src}`}
                           target="_blank"
                           rel="noreferrer"
