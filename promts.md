@@ -1620,6 +1620,7 @@ It continuously improves without any human prompts.
 
 The dashboard should feel like watching an autonomous AI analyst perform real editorial work in real time rather than monitoring a backend server.
 
+
 ## Prompt 5
 The application currently throws the following React error:
 
@@ -1635,9 +1636,7 @@ DO NOT remove any functionality.
 
 ONLY fix the underlying React issue while preserving all current behavior.
 
-====================================================
 TASK
-====================================================
 
 Inspect the entire project for every React list rendering.
 
@@ -1667,9 +1666,7 @@ Timeline
 
 Any dynamic component.
 
-====================================================
 FIND THE ROOT CAUSE
-====================================================
 
 The duplicate key is likely caused by one of the following:
 
@@ -1682,9 +1679,7 @@ The duplicate key is likely caused by one of the following:
 
 Locate the exact source.
 
-====================================================
 FIX REQUIREMENTS
-====================================================
 
 Every rendered object must have a guaranteed unique id.
 
@@ -1716,9 +1711,7 @@ Example
 
 post-${Date.now()}-${Math.random().toString(36).substring(2,9)}
 
-====================================================
 MOCK DATA
-====================================================
 
 Inspect all mock JSON files.
 
@@ -1740,9 +1733,7 @@ queue ids
 
 timeline ids
 
-====================================================
 REACT KEYS
-====================================================
 
 Every list rendered with map() must use:
 
@@ -1758,9 +1749,7 @@ unless absolutely unavoidable.
 
 Do NOT use duplicated timestamps.
 
-====================================================
 STATE
-====================================================
 
 If new posts are generated dynamically,
 
@@ -1768,9 +1757,7 @@ ensure every generated object receives a fresh UUID.
 
 Never reuse previous IDs.
 
-====================================================
 OPTIONAL SAFETY CHECK
-====================================================
 
 Before inserting new posts into state,
 
@@ -1780,9 +1767,7 @@ If it exists,
 
 generate a new UUID.
 
-====================================================
 FINAL RESULT
-====================================================
 
 The application should run without any
 
@@ -1801,29 +1786,10 @@ Do not modify the UI.
 Only fix the underlying React data and rendering issue.
 
 ## Prompt 6
-The application is already visually complete.
+I want to deploy it on vercel
 
-DO NOT redesign the UI.
-
-DO NOT change colors.
-
-DO NOT change typography.
-
-DO NOT change spacing.
-
-DO NOT redesign cards.
-
-DO NOT redesign the dashboard.
-
-Maintain the exact premium cyberpunk enterprise aesthetic.
-
-The goal now is NOT visual improvements.
-
-The goal is PRODUCT STORYTELLING.
-
-========================================================
+## Prompt 7
 PRIMARY GOAL
-========================================================
 
 The user should feel like they are observing a living autonomous AI analyst rather than using dashboard software.
 
@@ -1831,9 +1797,7 @@ Every page should answer one question:
 
 "What is AETHRA thinking right now?"
 
-========================================================
 1. CREATE A "DECISION REPLAY" EXPERIENCE
-========================================================
 
 This is the most important feature.
 
@@ -1927,9 +1891,7 @@ Animate every step.
 
 This should feel like replaying the AI's thinking process.
 
-========================================================
 2. ADD A LIVE AI THOUGHT STREAM
-========================================================
 
 At the very top of the dashboard create a continuously changing thought banner.
 
@@ -1953,9 +1915,7 @@ The thought stream should update automatically every few seconds.
 
 It should feel like internal thoughts.
 
-========================================================
 3. MAKE DR NOVA FEEL ALIVE
-========================================================
 
 Instead of showing only the persona information,
 
@@ -1983,9 +1943,7 @@ Estimated Completion
 
 The AI should feel like an employee actively working.
 
-========================================================
 4. ENHANCE THE AUTONOMOUS TIMELINE
-========================================================
 
 Instead of static timestamps,
 
@@ -2035,9 +1993,7 @@ Knowledge graph updated
 
 New entries should animate into the timeline.
 
-========================================================
 5. DECISION EXPLAINABILITY
-========================================================
 
 Every publication should include a visual scorecard.
 
@@ -2067,9 +2023,7 @@ Final Publishing Confidence
 
 Explain every score in one sentence.
 
-========================================================
 6. MAKE THE KNOWLEDGE GRAPH USEFUL
-========================================================
 
 The graph should not be decorative.
 
@@ -2087,9 +2041,7 @@ Memory History
 
 The graph should visually grow as new publications are added.
 
-========================================================
 7. ADD "WHY NOT THIS?"
-========================================================
 
 Beside every published article,
 
@@ -2111,9 +2063,7 @@ Consumer-facing announcement with limited engineering relevance.
 
 This demonstrates editorial judgement.
 
-========================================================
 8. AUTONOMOUS HEARTBEAT
-========================================================
 
 Create a subtle heartbeat indicator.
 
@@ -2135,9 +2085,7 @@ Reasoning
 
 Heartbeat should pulse continuously.
 
-========================================================
 9. HUMANIZE THE AI
-========================================================
 
 Replace robotic labels with natural intelligence.
 
@@ -2181,9 +2129,7 @@ Use
 
 Removing Low-Value Topics
 
-========================================================
 10. LANDING PAGE
-========================================================
 
 Create a premium landing page before entering the dashboard.
 
@@ -2223,9 +2169,7 @@ After clicking,
 
 transition beautifully into the dashboard.
 
-========================================================
 11. FINAL PRODUCT EXPERIENCE
-========================================================
 
 The application should feel like watching an autonomous AI employee working in real time.
 
@@ -2246,7 +2190,7 @@ and every page should reinforce one idea:
 AETHRA operates independently without waiting for human prompts.
 
 
-## Prompt 11 (Checkpoint 2)
+## Prompt 8 (Checkpoint 2)
 Implement features from Prompt 9 and Prompt 10:
 - Autonomous Heartbeat Indicator and Live Thought Stream Banner in dashboard overview.
 - Dr Nova Live Focus, Goal, Reasoning, and Estimated Completion parameters.
@@ -2257,5 +2201,3 @@ Implement features from Prompt 9 and Prompt 10:
 - Interactive Knowledge Vector Graph Node payload inspector.
 - Pre-dashboard sequential stage animations in LandingPage.
 
-## Prompt 12
-run file
