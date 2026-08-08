@@ -12,18 +12,10 @@ export const AnalyticsView: React.FC = () => {
 
   // 1. Category Distribution Calculation
   const categoryData = useMemo(() => {
-    const counts: Record<string, number> = {
-      'Agentic AI': 0,
-      'Infrastructure': 0,
-      'RAG & Data': 0,
-      'LLMs & Hardware': 0,
-      'Security & Align': 0
-    };
+    const counts: Record<string, number> = {};
 
     decisions.forEach(d => {
-      if (counts[d.category] !== undefined) {
-        counts[d.category]++;
-      }
+      counts[d.category] = (counts[d.category] || 0) + 1;
     });
 
     // Make sure we have at least some values to display nice charts.
@@ -37,35 +29,52 @@ export const AnalyticsView: React.FC = () => {
 
   // 2. Source Reliability Calculation
   const sourceData = useMemo(() => {
-    return [
-      { name: 'arXiv Repo', credibility: 95, volume: 14 },
-      { name: 'Anthropic Blog', credibility: 98, volume: 8 },
-      { name: 'Vercel Labs', credibility: 94, volume: 10 },
-      { name: 'GitHub Commits', credibility: 91, volume: 22 },
-      { name: 'HackerNews', credibility: 78, volume: 30 }
-    ];
-  }, []);
+    const counts: Record<string, { totalCred: number; count: number }> = {};
+    
+    decisions.forEach(d => {
+      if (!counts[d.source]) {
+        counts[d.source] = { totalCred: 0, count: 0 };
+      }
+      counts[d.source].totalCred += d.credibilityScore;
+      counts[d.source].count += 1;
+    });
+
+    const mapped = Object.entries(counts).map(([name, val]) => ({
+      name: name.replace("http://", "").replace("https://", "").split("/")[0],
+      credibility: Math.round(val.totalCred / val.count),
+      volume: val.count
+    }));
+
+    if (mapped.length === 0) {
+      return [
+        { name: 'arXiv Repo', credibility: 95, volume: 14 },
+        { name: 'Anthropic Blog', credibility: 98, volume: 8 },
+        { name: 'GitHub Commits', credibility: 91, volume: 22 },
+        { name: 'OpenAI Blog', credibility: 96, volume: 12 }
+      ];
+    }
+    return mapped;
+  }, [decisions]);
 
   // 3. Memory Growth (Cumulative nodes over simulated intervals)
   const memoryGrowthData = useMemo(() => {
     const currentSize = memoryNodes.length;
     return [
-      { interval: 'Interval 1', size: Math.max(7, currentSize - 6) },
-      { interval: 'Interval 2', size: Math.max(9, currentSize - 4) },
-      { interval: 'Interval 3', size: Math.max(11, currentSize - 2) },
+      { interval: 'Interval 1', size: Math.max(2, currentSize - 6) },
+      { interval: 'Interval 2', size: Math.max(3, currentSize - 4) },
+      { interval: 'Interval 3', size: Math.max(4, currentSize - 2) },
       { interval: 'Current', size: currentSize }
     ];
   }, [memoryNodes.length]);
 
   // 4. Acceptance Statistics
   const acceptanceStats = useMemo(() => {
-    const total = decisions.length;
     const accepted = decisions.filter(d => d.recommendation === 'Accept').length;
     const rejected = decisions.filter(d => d.recommendation === 'Reject').length;
     
     return [
-      { name: 'Accepted', value: accepted || 3, fill: '#00f0ff' },
-      { name: 'Rejected', value: rejected || 2, fill: '#a855f7' }
+      { name: 'Accepted', value: accepted, fill: '#00f0ff' },
+      { name: 'Rejected', value: rejected, fill: '#a855f7' }
     ];
   }, [decisions]);
 

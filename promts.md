@@ -1788,10 +1788,564 @@ Only fix the underlying React data and rendering issue.
 ## Prompt 6
 I want to deploy it on vercel
 
-
 ## Prompt 7
-Improve dynamic structure of my code
+PRIMARY GOAL
+
+The user should feel like they are observing a living autonomous AI analyst rather than using dashboard software.
+
+Every page should answer one question:
+
+"What is AETHRA thinking right now?"
+
+1. CREATE A "DECISION REPLAY" EXPERIENCE
+
+This is the most important feature.
+
+When any published article or candidate topic is clicked,
+
+open a beautiful side drawer or modal.
+
+Display the complete reasoning timeline.
+
+Example
+
+────────────────────────────
+
+DECISION REPLAY
+
+09:00
+
+Topic Discovered
+
+↓
+
+Collected from
+
+OpenAI
+GitHub
+arXiv
+
+↓
+
+Credibility Analysis
+
+97%
+
+↓
+
+Compared against
+
+23 competing topics
+
+↓
+
+Memory Comparison
+
+Compared with 18 previous publications
+
+↓
+
+Duplicate Score
+
+12%
+
+↓
+
+Novelty Score
+
+95%
+
+↓
+
+Engineering Impact
+
+98%
+
+↓
+
+Editorial Policy
+
+PASS
+
+↓
+
+Publishing Confidence
+
+96%
+
+↓
+
+Final Decision
+
+APPROVED
+
+↓
+
+Knowledge Graph Updated
+
+YES
+
+────────────────────────────
+
+Animate every step.
+
+This should feel like replaying the AI's thinking process.
+
+2. ADD A LIVE AI THOUGHT STREAM
+
+At the very top of the dashboard create a continuously changing thought banner.
+
+Examples
+
+Scanning arXiv for new research...
+
+Comparing candidate topics...
+
+Checking memory graph...
+
+Rejecting low-impact announcements...
+
+Evaluating engineering relevance...
+
+Writing technical summary...
+
+Waiting for next discovery cycle...
+
+The thought stream should update automatically every few seconds.
+
+It should feel like internal thoughts.
+
+3. MAKE DR NOVA FEEL ALIVE
+
+Instead of showing only the persona information,
+
+add a live status.
+
+Example
+
+Dr Nova
+
+Current Focus
+
+Evaluating Anthropic MCP release
+
+Current Goal
+
+Determine engineering significance
+
+Current Reasoning
+
+Comparing against historical memory
+
+Estimated Completion
+
+14 seconds
+
+The AI should feel like an employee actively working.
+
+4. ENHANCE THE AUTONOMOUS TIMELINE
+
+Instead of static timestamps,
+
+make it scroll like activity logs.
+
+Example
+
+09:00
+
+111 topics discovered
+
+↓
+
+09:01
+
+47 removed by credibility filter
+
+↓
+
+09:03
+
+Compared against previous memory
+
+↓
+
+09:05
+
+DeepSeek MLA selected
+
+↓
+
+09:06
+
+Generated editorial draft
+
+↓
+
+09:07
+
+Published
+
+↓
+
+09:08
+
+Knowledge graph updated
+
+New entries should animate into the timeline.
+
+5. DECISION EXPLAINABILITY
+
+Every publication should include a visual scorecard.
+
+Engineering Impact
+
+98%
+
+Novelty
+
+95%
+
+Credibility
+
+97%
+
+Memory Similarity
+
+12%
+
+Editorial Policy Match
+
+100%
+
+Final Publishing Confidence
+
+96%
+
+Explain every score in one sentence.
+
+6. MAKE THE KNOWLEDGE GRAPH USEFUL
+
+The graph should not be decorative.
+
+Clicking any node should reveal
+
+Related Publications
+
+Previous Mentions
+
+Connected Topics
+
+Knowledge Relationships
+
+Memory History
+
+The graph should visually grow as new publications are added.
+
+7. ADD "WHY NOT THIS?"
+
+Beside every published article,
+
+display the strongest competing topic.
+
+Example
+
+Selected
+
+Anthropic MCP
+
+Rejected Alternative
+
+Google AI Product Launch
+
+Reason
+
+Consumer-facing announcement with limited engineering relevance.
+
+This demonstrates editorial judgement.
+
+8. AUTONOMOUS HEARTBEAT
+
+Create a subtle heartbeat indicator.
+
+Example
+
+● AI ACTIVE
+
+Last Decision
+
+32 seconds ago
+
+Next Scan
+
+19 minutes
+
+Current Cycle
+
+Reasoning
+
+Heartbeat should pulse continuously.
+
+9. HUMANIZE THE AI
+
+Replace robotic labels with natural intelligence.
+
+Instead of
+
+Monitoring
+
+Use
+
+Observing AI Ecosystem
+
+Instead of
+
+Reasoning
+
+Use
+
+Evaluating Engineering Significance
+
+Instead of
+
+Memory Updated
+
+Use
+
+Learned from Today's Publication
+
+Instead of
+
+Publishing
+
+Use
+
+Sharing Technical Insight
+
+Instead of
+
+Filter
+
+Use
+
+Removing Low-Value Topics
+
+10. LANDING PAGE
+
+Create a premium landing page before entering the dashboard.
+
+Large headline
+
+"AETHRA AI"
+
+Subtitle
+
+"The Autonomous Editorial Intelligence System"
+
+Explain in one animation
+
+Discover
+
+↓
+
+Reason
+
+↓
+
+Remember
+
+↓
+
+Publish
+
+↓
+
+Learn
+
+Button
+
+Initialize Agent
+
+After clicking,
+
+transition beautifully into the dashboard.
+
+11. FINAL PRODUCT EXPERIENCE
+
+The application should feel like watching an autonomous AI employee working in real time.
+
+The user is not controlling the AI.
+
+The user is observing it think.
+
+Every animation,
+
+every timeline,
+
+every notification,
+
+every metric,
+
+and every page should reinforce one idea:
+
+AETHRA operates independently without waiting for human prompts.
 
 
-## Prompt 8
+## Prompt 8 (Checkpoint 2)
+Implement features from Prompt 9 and Prompt 10:
+- Autonomous Heartbeat Indicator and Live Thought Stream Banner in dashboard overview.
+- Dr Nova Live Focus, Goal, Reasoning, and Estimated Completion parameters.
+- Scrolling Ingestion Timeline Logs.
+- Cascading Decision Replay side drawers with spring staggers.
+- Explainability Scorecards with explainer sentences in FeedView and DashboardOverview drawers.
+- "Why Not This?" Competing Alternatives compared side-by-side.
+- Interactive Knowledge Vector Graph Node payload inspector.
+- Pre-dashboard sequential stage animations in LandingPage.
+
+
+## Prompt 9
+Autonomous AI Creator
+Build an autonomous AI and technology persona that no longer waits for instructions.
+
+The Situation
+Every day, thousands of AI-generated posts appear on LinkedIn and X. Almost all of them exist because a human wrote the first prompt.
+
+Today's models are excellent writers. They are rarely autonomous creators.
+
+Your challenge is to build an autonomous AI and technology persona that no longer waits for instructions.
+
+Once initialized, the agent should independently:
+
+Discover topics from live information sources
+Decide whether a topic is worth publishing
+Write in a consistent editorial voice
+Remember previously published content
+Continue publishing over time without additional human input
+The persona must represent an original identity within the AI and technology ecosystem.
+
+Examples include:
+
+AI Security Researcher
+Machine Learning Engineer
+AI Product Analyst
+Open Source Contributor
+Robotics Engineer
+Developer Advocate
+AI Ethics Researcher
+Or any original AI or technology-focused persona
+After initialization, the agent must operate autonomously.
+
+Minimum Requirements
+Your submission must implement the following capabilities.
+
+1. Topic Discovery
+The agent independently discovers AI and technology topics using the web or another live information source.
+
+2. Editorial Judgment
+Not every discovered topic deserves publishing.
+
+The agent should demonstrate editorial judgment by intentionally rejecting topics that do not meet its publishing standards.
+
+3. Consistent Persona
+Maintain a recognizable identity with:
+
+A consistent writing style
+Stable interests
+Distinct editorial opinions
+A coherent voice
+The persona should remain focused on AI and technology throughout the evaluation period.
+
+4. Memory
+The agent should remember previously published content to maintain continuity and avoid unnecessary repetition.
+
+5. Autonomous Publishing
+Publishing must occur over time rather than generating all content immediately.
+
+Submissions will be observed for approximately 48 hours after initialization. During this period, evaluators may query the feed endpoint multiple times.
+
+New posts should appear without any additional prompts or API calls.
+
+Simulated publishing is acceptable. Integration with real social media platforms is not required.
+
+6. Publishing Rationale
+Every published post must include:
+
+Why the topic was selected
+Why it is relevant now
+The source(s) of information
+This information must be returned through the API response.
+
+Evaluation Criteria
+Judging will primarily consider:
+
+Autonomous operation after initialization
+Quality of editorial decision-making
+Consistency of the AI persona
+Effective use of memory
+Transparency of publishing rationale
+Overall quality and coherence of the generated feed
+Out of Scope
+The following are not required:
+
+Posting to real social media platforms
+Multi-platform publishing
+Images or videos
+Engagement analytics
+Multi-agent architectures
+Human intervention after initialization
+API Requirements
+Your submission must expose two HTTP endpoints.
+
+1. Initialize Agent
+Called exactly once before evaluation begins.
+
+Endpoint
+POST /api/agent/init
+Request
+{
+  "persona": {
+    "name": "Ada",
+    "domain": "AI Security"
+  }
+}
+Response
+{
+  "agentId": "abc-123"
+}
+2. Retrieve Feed
+After initialization, this is the only endpoint the evaluator will call.
+
+Endpoint
+GET /api/agent/feed?agentId=abc-123
+Response
+{
+  "posts": [
+    {
+      "id": "p7",
+      "createdAt": "2026-08-07T10:30:00Z",
+      "text": "...",
+      "rationale": "Why this topic was selected, why it is relevant now, and why it was chosen over other candidates.",
+      "sources": [
+        "https://..."
+      ]
+    }
+  ]
+}
+Feed Requirements
+Return posts in reverse chronological order (newest first).
+Each post must have a unique id.
+createdAt must be an ISO 8601 UTC timestamp.
+Previously returned posts should remain available.
+If no posts exist, return:
+{
+  "posts": []
+}
+Submission Rules
+The evaluator will call POST /api/agent/init exactly once.
+No further instructions or prompts will be provided.
+During the evaluation period, the evaluator will periodically call GET /api/agent/feed.
+Any new posts appearing in the feed must be generated entirely by the autonomous agent after initialization.
+
+now tell me if this is completely ready and as per problem statement or something is missing
+
+## Prompt 10
 /review

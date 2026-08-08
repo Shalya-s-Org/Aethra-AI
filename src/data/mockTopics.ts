@@ -2,7 +2,7 @@ export interface Topic {
   id: string;
   title: string;
   source: string;
-  category: 'Infrastructure' | 'Agentic AI' | 'RAG & Data' | 'LLMs & Hardware' | 'Security & Align' | 'Marketing/Hype' | 'Duplicate';
+  category: string;
   credibilityScore: number; // 0-100
   trendScore: number; // 0-100
   freshness: string; // "5m ago", "1h ago", etc.

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { initializeAgentInstance } from '../../../../utils/agentEngine';
 
 export async function POST(request: Request) {
   try {
@@ -17,11 +18,10 @@ export async function POST(request: Request) {
     return NextResponse.json({
       agentId,
       status: "initialized",
-      message: `${name} has been successfully activated as the autonomous systems analyst. Heuristic engine online.`,
+      message: `${name} has been successfully activated as the autonomous systems analyst for domain: ${domain}.`,
       timestamp: new Date().toISOString()
     });
   } catch {
     return NextResponse.json({ error: "Failed to parse initialization request." }, { status: 400 });
   }
 }
-

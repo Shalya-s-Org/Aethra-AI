@@ -1,16 +1,7 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { Topic, Post, MemoryNode, initialTopics, initialPosts, initialMemory } from '../data/mockTopics';
-
-// Helper function to generate guaranteed unique IDs
-const generateUUID = (prefix: string): string => {
-  if (typeof window !== 'undefined' && window.crypto && typeof window.crypto.randomUUID === 'function') {
-    return `${prefix}-${window.crypto.randomUUID()}`;
-  }
-  const randomSuffix = Math.random().toString(36).substring(2, 9);
-  return `${prefix}-${Date.now()}-${randomSuffix}`;
-};
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { Topic, Post, MemoryNode } from '../data/mockTopics';
 
 export type AgentStatus = 'inactive' | 'idle' | 'scanning' | 'filtering' | 'reasoning' | 'memory_check' | 'writing' | 'publishing' | 'learning';
 
@@ -37,7 +28,7 @@ interface AgentContextType {
   config: AgentConfig;
   isInitialized: boolean;
   agentId: string;
-  initializeAgent: (config: AgentConfig) => void;
+  initializeAgent: (config: AgentConfig) => Promise<void>;
   resetAgent: () => void;
 
   // State
@@ -72,11 +63,11 @@ const AgentContext = createContext<AgentContextType | undefined>(undefined);
 
 const DEFAULT_CONFIG: AgentConfig = {
   name: "Dr. Nova",
-  role: "AI Systems Architect & Technology Analyst",
-  domain: "AI Engineering, Infrastructure, Security, Open Source, Agentic Systems",
-  mission: "Publish only developments that materially impact AI engineering, production systems, security, infrastructure, open source, agentic AI, RAG, MCP, LLMs and AI deployment.",
-  frequency: "30",
-  style: "Professional, Analytical, Evidence-based, Opinionated, Concise, Calm, Highly Technical"
+  role: "AI Systems Architect",
+  domain: "AI Systems & Hardware",
+  mission: "Publish only developments that impact enterprise systems architecture.",
+  frequency: "15",
+  style: "Professional, Skeptical of Hype, Concise, Highly Technical"
 };
 
 // Initial list of rejected topics to display today
@@ -209,12 +200,12 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Pipeline Load counters matching specified metrics
   const [pipelineStats, setPipelineStats] = useState<PipelineStats>({
-    scanCount: 89,
-    filterCount: 61,
-    reasonCount: 18,
-    memoryCount: 3,
-    writeCount: 2,
-    publishCount: 1
+    scanCount: 0,
+    filterCount: 0,
+    reasonCount: 0,
+    memoryCount: 0,
+    writeCount: 0,
+    publishCount: 0
   });
 
   const [discoveredTopics, setDiscoveredTopics] = useState<Topic[]>([]);
@@ -462,26 +453,26 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setAgentId("");
     setStatus('inactive');
     setCurrentActionDetails("Agent offline. Initialize agent parameters to activate.");
-    setCountdown(30);
-    setSecondsSinceLastScan(17);
+    setCountdown(15);
+    setSecondsSinceLastScan(0);
     setMissionProgress(0);
-    setNextPublishSeconds(5040);
     setPipelineStats({
-      scanCount: 89,
-      filterCount: 61,
-      reasonCount: 18,
-      memoryCount: 3,
-      writeCount: 2,
-      publishCount: 1
+      scanCount: 0,
+      filterCount: 0,
+      reasonCount: 0,
+      memoryCount: 0,
+      writeCount: 0,
+      publishCount: 0
     });
     setDiscoveredTopics([]);
-    setPosts(initialPosts);
-    setMemoryNodes(initialMemory);
+    setPosts([]);
+    setMemoryNodes([]);
     setDecisions([]);
-    setRejectedTodayList(INITIAL_REJECTED_TODAY);
+    setRejectedTodayList([]);
     setActiveTopic(null);
     setPipelineProgress(0);
-    unprocessedPool.current = [...initialTopics];
+    setLastDecisionTimeSeconds(0);
+    setAutonomousTimelineLogs([]);
   };
 
   return (
@@ -507,7 +498,10 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       activeTab,
       setActiveTab,
       activeTopic,
-      pipelineProgress
+      pipelineProgress,
+      lastDecisionTimeSeconds,
+      autonomousTimelineLogs,
+      novaLiveFocus
     }}>
       {children}
     </AgentContext.Provider>
