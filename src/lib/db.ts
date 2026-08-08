@@ -238,6 +238,22 @@ const MIGRATIONS: Migration[] = [
       );
       CREATE INDEX IF NOT EXISTS idx_init_requests_agent ON init_requests (agent_id);
     `
+  },
+  {
+    id: '003_init_requests_nullable_agent',
+    // A claim row exists BEFORE the agent does, so agent_id must be nullable.
+    // (002 shipped with NOT NULL + a placeholder value that violated the FK.)
+    sql: `
+      DROP TABLE IF EXISTS init_requests;
+      CREATE TABLE init_requests (
+        idempotency_key TEXT PRIMARY KEY,
+        agent_id        TEXT REFERENCES agents(id) ON DELETE CASCADE,
+        response_json   TEXT NOT NULL,
+        status          INTEGER NOT NULL,
+        created_at      TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_init_requests_agent ON init_requests (agent_id);
+    `
   }
 ];
 
@@ -820,7 +836,8 @@ export function getRunsByAgent(agentId: string): RunRow[] {
 // ---------------------------------------------------------------------------
 
 export interface InitResponseRecord {
-  agentId: string;
+  /** Null while the key is claimed but the agent is not yet created. */
+  agentId: string | null;
   responseJson: string;
   status: number;
 }
@@ -833,7 +850,7 @@ export function getInitResponse(idempotencyKey: string): InitResponseRecord | nu
     .get(idempotencyKey);
   if (!row) return null;
   return {
-    agentId: String(row.agent_id),
+    agentId: row.agent_id == null ? null : String(row.agent_id),
     responseJson: String(row.response_json),
     status: Number(row.status)
   };
@@ -841,12 +858,13 @@ export function getInitResponse(idempotencyKey: string): InitResponseRecord | nu
 
 /** Atomically claim a key. Returns true if THIS caller won the claim.
  *  Concurrency-safe: a second caller with the same key gets false and must
- *  replay the winner's stored response. */
+ *  replay the winner's stored response. The claim row precedes the agent, so
+ *  agent_id is null until the winner stores its response. */
 export function claimInitKey(idempotencyKey: string): boolean {
   const result = getDb()
     .prepare(
       `INSERT OR IGNORE INTO init_requests (idempotency_key, agent_id, response_json, status, created_at)
-       VALUES (?, '', '', 0, ?)`
+       VALUES (?, NULL, '', 0, ?)`
     )
     .run(idempotencyKey, new Date().toISOString());
   return result.changes > 0;

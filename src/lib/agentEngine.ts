@@ -29,7 +29,8 @@ import {
   listDueAgentIds,
   putAgentRow,
   updateRun,
-  upsertTopicRow
+  upsertTopicRow,
+  withTransaction
 } from './db';
 import { ulid } from './ids';
 import { canonicalizeSourceUrl } from './urls';
@@ -433,8 +434,9 @@ export function initializeAgentInstance(
   customHeuristics?: { role?: string; mission?: string; frequency?: string; style?: string },
   now: number = Date.now()
 ): BackendAgentInstance {
-  const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, '-');
-  const agentId = customAgentId || `agent-${cleanName}-${now}-${Math.random().toString(36).substring(2, 9)}`;
+  // Opaque, collision-resistant agent id (ULID). Never derived from the persona,
+  // so ids are unguessable and stable for the agent's lifetime.
+  const agentId = customAgentId || ulid();
   const frequency = customHeuristics?.frequency || "15";
 
   const topicPool = selectPoolForDomain(domain);
@@ -458,8 +460,9 @@ export function initializeAgentInstance(
     style: customHeuristics?.style || "Professional, Analytical, Skeptical of Hype, Concise, Calm, Highly Technical"
   };
 
-  // Seed posts get ULID ids so the snapshot and the posts table agree.
-  const seedPosts = getInitialSeedPosts(domain, now).map(p => ({ ...p, id: ulid() }));
+  // Demo/seed posts: ULID ids + demoOnly flag. They are excluded from the
+  // judged GET /api/agent/feed API and never count toward duplicate prevention.
+  const seedPosts = getInitialSeedPosts(domain, now).map(p => ({ ...p, id: ulid(), demoOnly: true }));
 
   const state: BackendAgentInstance = {
     agentId,
@@ -500,64 +503,72 @@ export function initializeAgentInstance(
     run: null
   };
 
-  putAgentRow(state, engine, now);
+  // Create the agent atomically: the row plus all seed content rows. A crash
+  // mid-init must never leave a half-created agent.
+  withTransaction(() => {
+    putAgentRow(state, engine, now);
 
-  // Seed content rows: each seed post becomes a topic row (canonical source),
-  // its sources, and a post row with a ULID id + ISO UTC published_at.
-  for (const post of seedPosts) {
-    const canonical = canonicalizeSourceUrl(post.sources[0] ?? '') ?? `title:${post.title}`;
-    const topicId = upsertTopicRow({
-      agentId,
-      title: post.title,
-      canonicalSourceUrl: canonical,
-      category: post.category,
-      sourceName: null,
-      credibilityScore: post.confidenceScore,
-      trendScore: null,
-      noveltyScore: post.noveltyScore,
-      importanceScore: post.importanceScore,
-      confidenceScore: post.confidenceScore,
-      recommendation: 'Accept',
-      rejectionReason: null,
-      detailedAnalysis: post.text,
-      opinion: post.opinion,
-      freshness: null,
-      rawJson: JSON.stringify(post),
-      createdAtMs: now
-    });
-    for (const source of post.sources) {
-      const url = canonicalizeSourceUrl(source);
-      if (url) insertSource({ agentId, topicId, url, sourceName: null });
+    // Seed content rows: each demo post becomes a topic row (demo canonical
+    // key), its sources, and a post row with a ULID id + ISO UTC published_at.
+    for (const post of seedPosts) {
+      // Demo topics use a `demo:` canonical key so they can never collide with
+      // (or shadow) a real scanned source — demo content must not block real
+      // publications or register as a published topic.
+      const canonical = `demo:${post.id}`;
+      const topicId = upsertTopicRow({
+        agentId,
+        title: post.title,
+        canonicalSourceUrl: canonical,
+        category: post.category,
+        sourceName: null,
+        credibilityScore: post.confidenceScore,
+        trendScore: null,
+        noveltyScore: post.noveltyScore,
+        importanceScore: post.importanceScore,
+        confidenceScore: post.confidenceScore,
+        recommendation: 'Accept',
+        rejectionReason: null,
+        detailedAnalysis: post.text,
+        opinion: post.opinion,
+        freshness: null,
+        rawJson: JSON.stringify(post),
+        createdAtMs: now
+      });
+      for (const source of post.sources) {
+        const url = canonicalizeSourceUrl(source);
+        if (url) insertSource({ agentId, topicId, url, sourceName: null });
+      }
+      const publishedAtMs = Date.parse(post.createdAt);
+      insertPost({
+        id: post.id,
+        agentId,
+        topicId,
+        title: post.title,
+        body: post.text,
+        opinion: post.opinion,
+        rationale: post.rationale,
+        confidenceScore: post.confidenceScore,
+        category: post.category,
+        importanceScore: post.importanceScore,
+        noveltyScore: post.noveltyScore,
+        publicationId: post.publicationId,
+        publishedAtMs: Number.isFinite(publishedAtMs) ? publishedAtMs : now,
+        isDemo: true
+      });
     }
-    const publishedAtMs = Date.parse(post.createdAt);
-    insertPost({
-      id: post.id,
-      agentId,
-      topicId,
-      title: post.title,
-      body: post.text,
-      opinion: post.opinion,
-      rationale: post.rationale,
-      confidenceScore: post.confidenceScore,
-      category: post.category,
-      importanceScore: post.importanceScore,
-      noveltyScore: post.noveltyScore,
-      publicationId: post.publicationId,
-      publishedAtMs: Number.isFinite(publishedAtMs) ? publishedAtMs : now
-    });
-  }
 
-  for (const node of getInitialSeedMemory(domain)) {
-    insertMemoryNode({
-      id: node.id,
-      agentId,
-      nodeLabel: node.label,
-      nodeGroup: node.group,
-      details: node.details,
-      connections: node.connections,
-      createdAtMs: now
-    });
-  }
+    for (const node of getInitialSeedMemory(domain)) {
+      insertMemoryNode({
+        id: node.id,
+        agentId,
+        nodeLabel: node.label,
+        nodeGroup: node.group,
+        details: node.details,
+        connections: node.connections,
+        createdAtMs: now
+      });
+    }
+  });
 
   return snapshotAgent(state, engine, now);
 }
@@ -567,8 +578,12 @@ export function initializeAgentInstance(
 export function advanceAgentById(agentId: string, now: number = Date.now()): BackendAgentInstance | null {
   const row = getAgentRow(agentId);
   if (!row) return null;
-  advanceTo(row.state, row.engine, now);
-  putAgentRow(row.state, row.engine, now);
+  // Atomic advance: stage transitions, content rows, and the snapshot persist
+  // together — a crash mid-run never leaves a torn state.
+  withTransaction(() => {
+    advanceTo(row.state, row.engine, now);
+    putAgentRow(row.state, row.engine, now);
+  });
   return snapshotAgent(row.state, row.engine, now);
 }
 

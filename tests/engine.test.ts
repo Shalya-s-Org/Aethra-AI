@@ -38,9 +38,12 @@ describe('initialization', () => {
     assert.ok(row);
     assert.equal(row.state.config.name, 'Engine Test');
 
-    const posts = getPostsByAgent(state.agentId);
+    // Seeds are demo-only: hidden from the judged feed, visible with includeDemo.
+    assert.equal(getPostsByAgent(state.agentId).length, 0, 'demo seeds must not appear in the judged feed');
+    const posts = getPostsByAgent(state.agentId, { includeDemo: true });
     assert.ok(posts.length >= 1, 'seed posts must be in the posts table');
     for (const post of posts) {
+      assert.ok(post.isDemo, 'seed posts must be marked demo-only');
       assert.ok(isUlid(post.id), `post id must be a ULID: ${post.id}`);
       assert.match(post.createdAt, ISO_UTC_RE, 'published_at must be ISO UTC');
       assert.ok(post.sources.every(s => s.startsWith('https://')), 'sources must be canonical HTTPS');
@@ -60,11 +63,11 @@ describe('pipeline cycle', () => {
 
     const snap = peekAgentState(id, T0 + 60_000);
     assert.equal(snap?.status, 'idle');
-    assert.equal(countPosts(id), 2); // seed + 1 published
+    assert.equal(countPosts(id), 1); // 1 real post (demo seed excluded)
 
     const posts = getPostsByAgent(id);
     const published = posts[0]; // newest
-    assert.equal(posts.length, 2);
+    assert.equal(posts.length, 1);
     assert.ok(isUlid(published.id));
     assert.match(published.createdAt, ISO_UTC_RE);
 
@@ -85,26 +88,26 @@ describe('pipeline cycle', () => {
 });
 
 describe('duplicate publication prevention', () => {
-  it('never republishes a canonical source already published (seed collision)', () => {
-    // "AI Security": the seed post shares arxiv.org/abs/2608.1092 with pool
-    // topic sec-1, so run 1 must be blocked as a duplicate.
+  it('demo seed posts never block real publications (same canonical source)', () => {
+    // "AI Security": the seed post's source (arxiv.org/abs/2608.1092) is the
+    // SAME canonical source as pool topic sec-1 — but seeds are demo-only, so
+    // sec-1 must still publish. Demo content never counts as published.
     const state = initializeAgentInstance('Dup Test', 'AI Security', undefined, undefined, T0);
     const id = state.agentId;
-    assert.equal(countPosts(id), 1); // seed only
+    assert.equal(countPosts(id), 0); // seed is demo-only, not counted
 
     advanceAgentById(id, T0 + 30_000); // start run 1 (sec-1)
-    advanceAgentById(id, T0 + 60_000); // complete run 1 -> duplicate
-    assert.equal(countPosts(id), 1, 'seed-duplicate topic must not publish');
+    advanceAgentById(id, T0 + 60_000); // complete run 1 -> published (demo overlap ignored)
+    assert.equal(countPosts(id), 1, 'sec-1 must publish despite the demo seed overlap');
 
     advanceAgentById(id, T0 + 90_000); // start run 2 (sec-2)
     advanceAgentById(id, T0 + 120_000); // complete run 2 -> published
-
     assert.equal(countPosts(id), 2, 'second topic should publish');
 
     const runs = getRunsByAgent(id); // ordered newest first
     assert.equal(runs.length, 2);
     assert.equal(runs[0].outcome, 'published');
-    assert.equal(runs[1].outcome, 'duplicate');
+    assert.equal(runs[1].outcome, 'published');
 
     // Both runs still record full editorial decisions with scores.
     const decisions = getDecisionsByAgent(id);
@@ -131,8 +134,8 @@ describe('duplicate publication prevention', () => {
     }
 
     const posts = getPostsByAgent(id);
-    // Seed + os-1 + os-2 = 3; os-3 rejected; regenerated clones are duplicates.
-    assert.equal(posts.length, 3, `expected seed + 2 unique posts, got ${posts.length}`);
+    // Demo seed excluded; os-1 + os-2 = 2; os-3 rejected; clones are duplicates.
+    assert.equal(posts.length, 2, `expected 2 unique posts, got ${posts.length}`);
 
     const runs = getRunsByAgent(id);
     assert.equal(runs.length, 6);
@@ -156,18 +159,18 @@ describe('durability across restarts', () => {
 
     advanceAgentById(id, T0 + 30_000);
     advanceAgentById(id, T0 + 60_000); // publish run 1
-    assert.equal(countPosts(id), 2);
+    assert.equal(countPosts(id), 1);
 
     // Simulate a server restart: drop the connection entirely.
     closeDb();
     const row = getAgentRow(id); // reopens the file
     assert.ok(row);
-    assert.equal(countPosts(id), 2, 'posts must survive a restart');
+    assert.equal(countPosts(id), 1, 'posts must survive a restart');
 
     // The simulation continues from persisted timestamps.
     advanceAgentById(id, T0 + 90_000); // run 2 (robot-2 accepted)
     advanceAgentById(id, T0 + 120_000); // complete run 2
-    assert.equal(countPosts(id), 3);
+    assert.equal(countPosts(id), 2);
     assert.equal(getRunsByAgent(id).length, 2);
 
     destroyAgent(id);
@@ -189,6 +192,6 @@ describe('durability across restarts', () => {
     const after = advanceAgentById(id, T0 + 40_000); // restart, wall clock advanced
     assert.ok(after);
     assert.equal(after.status, 'idle', 'fast-forwarded run should finish after restart');
-    assert.equal(countPosts(id), 2); // seed + robot-1 published
+    assert.equal(countPosts(id), 1); // robot-1 published (demo seed excluded)
   });
 });
