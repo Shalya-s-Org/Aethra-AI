@@ -279,18 +279,19 @@ describe('tie-breaks', () => {
     const run = await runEditorial(opts);
     const d1 = decisionOf(run, older.id);
     const d2 = decisionOf(run, newer.id);
-    console.error('TIE-DEBUG d1:', d1.kind, d1.totalScore, '|', d1.explanation);
-    console.error('TIE-DEBUG d2:', d2.kind, d2.totalScore, '|', d2.explanation);
     assert.equal(d1.totalScore, d2.totalScore, 'scores must tie');
     assert.equal(d1.kind, 'accepted', 'older candidate wins the slot');
     assert.equal(d2.kind, 'held');
     assert.match(d2.explanation, /Rate-limited: next routine slot/);
 
-    // Re-running is idempotent: the held candidate stays held, and the DB has
+    // Re-running is idempotent: the newer candidate is now memory-aware — the
+    // accepted sibling makes it a same-story follow-up without meaningful new
+    // information, so it is rejected rather than re-held; the DB still has
     // exactly one row per candidate (upsert, never duplicate rows).
     const rerun = await runEditorial(opts);
     const r2 = decisionOf(rerun, newer.id);
-    assert.equal(r2.kind, 'held');
+    assert.equal(r2.kind, 'rejected');
+    assert.match(r2.explanation, /Follow-up on .* without meaningful new information/);
     const rows = getDiscoveryDecisions({ limit: 100 });
     assert.equal(rows.filter(r => r.candidateId === older.id).length, 1);
     assert.equal(rows.filter(r => r.candidateId === newer.id).length, 1);
@@ -347,11 +348,15 @@ describe('routine interval and daily cap', () => {
 
 describe('breaking-security override', () => {
   it('accepts a verified high-severity CISA KEV item despite a low score and a busy interval', async () => {
-    // One routine post occupies the interval slot first.
+    // One routine post occupies the interval slot first. It must be a DISTINCT
+    // story (fresh title/summary/CVE) — reusing the STRONG_BASE title/summary
+    // would now be correctly rejected as a no-new-info follow-up of the story
+    // accepted earlier in this file.
     const routine = addCandidate({
       ...STRONG_NO_SEV,
-      title: 'Routine post: critical agent framework flaw allows remote code execution',
-      summary: STRONG_BASE.summary,
+      title: 'Routine post: critical heap corruption in agent gateway allows remote code execution',
+      summary:
+        'A critical heap corruption bug in the agent gateway deserialization path lets an unauthenticated attacker gain remote code execution. Proof of concept available; patch released. CVE-2026-88887 assigned.',
       canonicalUrl: 'https://github.com/advisories/GHSA-ovr-1',
       publishedAt: iso(nowFor(9) - 4 * HOUR)
     });
@@ -365,7 +370,6 @@ describe('breaking-security override', () => {
     assert.equal(decisionOf(run, routine.id).kind, 'accepted');
 
     const d = decisionOf(run, kev.id);
-    console.error('KEV-DEBUG:', d.kind, d.totalScore, '|', d.explanation);
     assert.equal(d.kind, 'accepted', 'breaking override must accept despite low score + interval');
     assert.ok(d.totalScore < 78, `override must not depend on the threshold (score ${d.totalScore})`);
     assert.match(d.explanation, /Breaking-security override/);

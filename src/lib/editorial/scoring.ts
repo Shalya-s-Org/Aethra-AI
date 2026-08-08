@@ -1,67 +1,18 @@
-// Deterministic scoring for the AI Security persona.
+// Deterministic, persona-driven scoring.
 //
 // Every function here is pure: the same candidate + context always yields the
 // same components, total, and flags (no randomness, no wall-clock side
-// effects — `now` is injected). Hard reject signals (stale/marketing/
+// effects — `now` is injected). The term vocabulary is sourced from the
+// persona definition (Ada by default), so "topic relevance scoring" and
+// "candidate rejection" are genuinely driven by the structured persona rather
+// than hardcoded constants. Hard reject signals (off-persona/stale/marketing/
 // unsupported/duplicate) and the breaking-security override are surfaced as
 // flags; the engine applies the decision rules.
 
+import type { Persona } from '../persona';
+import { getPersona } from '../persona';
 import type { RelevantMemory } from '../memory/memory';
 import type { EditorialFlags, ScoreComponents, ScoredCandidate, ScorableCandidate } from './types';
-
-// ---------------------------------------------------------------------------
-// Persona lexicons (AI Security). Matching is deterministic prefix matching
-// with word boundaries; the two shortest tokens (ai, llm) match whole words
-// only to avoid false positives like "said"/"aim".
-// ---------------------------------------------------------------------------
-
-const SECURITY_TERMS = [
-  'cve', 'vulnerab', 'exploit', 'security', 'injection', 'jailbreak', 'sandbox', 'bypass',
-  'privilege', 'ssrf', 'rce', 'remote code', 'ransomware', 'malware', 'adversarial',
-  'red team', 'threat', 'patch', 'hardening', 'authentication', 'encryption', 'data breach',
-  'leak', 'backdoor', 'zero-day', 'phishing', 'denial of service', 'prompt injection',
-  'guardrail', 'model extraction', 'data poisoning', 'supply chain', 'escalation',
-  'exfiltration', 'tamper', 'fuzzing', 'memory safety', 'buffer overflow', 'side channel',
-  'evasion', 'spoofing', 'attacker', 'attack', 'compromise', 'malicious'
-];
-
-const AI_TERMS = [
-  'llm', 'model', 'agent', 'artificial intelligence', 'machine learning', 'neural', 'rag',
-  'prompt', 'transformer', 'inference', 'fine-tun', 'gpt', 'token', 'embedding',
-  'vector database', 'multimodal', 'training data', 'openai', 'anthropic', 'deepseek',
-  'huggingface', 'ai'
-];
-
-const TECHNICAL_TERMS = [
-  'bypass', 'exploit', 'patch', 'fix', 'disclos', 'advisory', 'proof of concept', 'poc',
-  'downgrade', 'escalation', 'protocol', 'architecture', 'pipeline', 'benchmark',
-  'evaluation', 'analysis', 'research', 'implementation', 'framework', 'library',
-  'runtime', 'container', 'api', 'serialization', 'deserialization', 'isolation',
-  'sandbox escape', 'command injection', 'sql injection', 'cross-site', 'csrf', 'xss',
-  'heap', 'stack', 'use-after-free', 'double free', 'type confusion', 'integer overflow',
-  'auth bypass', 'token theft', 'credential', 'smuggling', 'websocket', 'gateway',
-  'endpoint', 'handler', 'cache', 'deserialization', 'tls', 'certificate', 'signature'
-];
-
-const MARKETING_TERMS = [
-  'raises', 'funding', 'series a', 'series b', 'seed round', 'launch', 'partnership',
-  'announcement', 'crowdfunding', 'kickstarter', 'coin', 'token sale', 'celebrity',
-  'meme', 'viral', 'marketing', 'press release', 'million', 'billion', 'startup',
-  'acquires', 'acquired', 'pre-order', 'app store', 'download', 'new app', 'wraps',
-  'hype', 'subscription', 'promo', 'giveaway'
-];
-
-const DISCUSSION_TERMS = [
-  'implications', 'controvers', 'debate', 'raises questions', 'trade-off', 'tradeoff',
-  'future of', 'impact on', 'concern', 'risk', 'opinion', 'limitations', 'ethics',
-  'policy', 'regulation', 'should', 'open question', 'critical view', 'warning',
-  'unanswered', 'outlook', 'landscape', 'adoption', 'ramification'
-];
-
-const STOPWORDS = new Set([
-  'the', 'a', 'an', 'of', 'for', 'in', 'on', 'with', 'and', 'or', 'to', 'via', 'at', 'by',
-  'from', 'is', 'are', 'was', 'were', 'its', 'it', 'this', 'that', 'we', 'our', 'new'
-]);
 
 // ---------------------------------------------------------------------------
 // Time windows
@@ -87,6 +38,11 @@ const DISCUSSION_BASE: Record<string, number> = {
   'github-release': 3
 };
 
+const STOPWORDS = new Set([
+  'the', 'a', 'an', 'of', 'for', 'in', 'on', 'with', 'and', 'or', 'to', 'via', 'at', 'by',
+  'from', 'is', 'are', 'was', 'were', 'its', 'it', 'this', 'that', 'we', 'our', 'new'
+]);
+
 // ---------------------------------------------------------------------------
 // Text helpers
 // ---------------------------------------------------------------------------
@@ -104,18 +60,26 @@ const hasGhsa = (text: string): boolean => /\bGHSA-[0-9A-Za-z-]{4,}\b/i.test(tex
 const hasArxivId = (text: string): boolean => /arxiv\.org\/abs\/\d{4}\.\d{4,}/i.test(text);
 const hasSeverityField = (raw: string): boolean => /"severity"\s*:\s*"(critical|high)"/i.test(raw);
 
+/** Prefix matching with word boundaries; the two shortest tokens (ai, llm)
+ *  match whole words only to avoid false positives like "said"/"aim". */
 function termPattern(term: string): RegExp {
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   if (term === 'ai' || term === 'llm') return new RegExp(`\\b${escaped}\\b`, 'i');
   return new RegExp(`\\b${escaped}\\w*\\b`, 'i');
 }
 
-function countTermHits(text: string, terms: string[]): number {
+export function countTermHits(text: string, terms: string[]): number {
   let hits = 0;
   for (const term of terms) {
     if (termPattern(term).test(text)) hits += 1;
   }
   return hits;
+}
+
+/** Which of the persona's recurring themes a candidate touches (for memory
+ *  tagging and explanations). */
+export function themeHitsOf(persona: Persona, text: string): string[] {
+  return persona.recurringThemes.filter(theme => termPattern(theme).test(text));
 }
 
 export function titleTokens(title: string): Set<string> {
@@ -158,9 +122,14 @@ export interface ScoringContext {
   corroborationCves: ReadonlySet<string>;
   /** Durable memory context (duplicate ladder + follow-up story). */
   memory?: RelevantMemory;
+  /** The persona driving relevance/rejection (defaults to Ada). */
+  persona?: Persona;
 }
 
 export function scoreCandidate(candidate: ScorableCandidate, ctx: ScoringContext): ScoredCandidate {
+  const persona = ctx.persona ?? getPersona(null);
+  const vocab = persona.vocabulary;
+
   const text = textOf(candidate);
   const raw = candidate.rawEvidence;
   const summary = candidate.summary ?? '';
@@ -170,16 +139,16 @@ export function scoreCandidate(candidate: ScorableCandidate, ctx: ScoringContext
   // so identifier detection scans the widest view, never just the prose.
   const identifierText = `${text} ${candidate.canonicalUrl} ${raw}`;
 
-  // persona relevance (/20)
-  const secHits = countTermHits(text, SECURITY_TERMS);
-  const aiHits = countTermHits(text, AI_TERMS);
+  // persona relevance (/20) — driven by the persona's vocabulary.
+  const secHits = countTermHits(text, vocab.securityTerms);
+  const aiHits = countTermHits(text, vocab.aiTerms);
   const personaRelevance = Math.min(
     20,
     (secHits > 0 ? 8 : 0) + (aiHits > 0 ? 6 : 0) + Math.min(6, secHits + aiHits)
   );
 
   // technical / significance impact (/20)
-  const techHits = countTermHits(text, TECHNICAL_TERMS);
+  const techHits = countTermHits(text, vocab.technicalTerms);
   const technicalImpact = Math.min(
     20,
     (hasCve(identifierText) ? 8 : 0) +
@@ -215,7 +184,7 @@ export function scoreCandidate(candidate: ScorableCandidate, ctx: ScoringContext
   const discussionValue = Math.min(
     10,
     (DISCUSSION_BASE[candidate.sourceType] ?? 4) +
-      Math.min(3, countTermHits(text, DISCUSSION_TERMS)) +
+      Math.min(3, countTermHits(text, vocab.discussionTerms)) +
       (summaryLen >= 300 ? 2 : 0)
   );
 
@@ -240,11 +209,16 @@ export function scoreCandidate(candidate: ScorableCandidate, ctx: ScoringContext
     personaRelevance + technicalImpact + sourceQuality + recency + novelty + discussionValue + evidenceConfidence;
 
   // Hard-rule signals.
-  const marketingHits = countTermHits(text, MARKETING_TERMS);
+  const marketingHits = countTermHits(text, vocab.marketingTerms);
+  const avoidHits = countTermHits(text, vocab.avoidTerms);
+  const offPersona =
+    avoidHits >= 2 || (avoidHits >= 1 && secHits === 0 && aiHits === 0) || personaRelevance === 0;
+
   const flags: EditorialFlags = {
     stale: ageMs > STALE_MS,
     marketing: marketingHits >= 2 || (marketingHits >= 1 && techHits === 0 && idCount === 0),
     unsupported: idCount === 0 && techHits <= 1 && summaryLen < 150,
+    offPersona: offPersona ? matchedAvoidTerm(text, vocab.avoidTerms) : undefined,
     breakingSecurity:
       ageMs <= BREAKING_FRESH_MS &&
       idCount >= 1 &&
@@ -277,4 +251,11 @@ export function scoreCandidate(candidate: ScorableCandidate, ctx: ScoringContext
   }
 
   return { candidate, components, total, flags };
+}
+
+function matchedAvoidTerm(text: string, avoidTerms: string[]): string | undefined {
+  for (const term of avoidTerms) {
+    if (termPattern(term).test(text)) return term;
+  }
+  return undefined;
 }

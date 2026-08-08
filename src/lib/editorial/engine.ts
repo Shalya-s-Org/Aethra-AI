@@ -24,11 +24,13 @@ import {
   recordMemoryForAccepted,
   type RelevantMemory
 } from '../memory/memory';
+import { getPersona, type Persona } from '../persona';
 import {
   extractCve,
   maxTitleSimilarity,
   scoreCandidate,
-  textOf
+  textOf,
+  themeHitsOf
 } from './scoring';
 import {
   PUBLISH_THRESHOLD,
@@ -95,6 +97,12 @@ function ageDays(now: number, publishedAt: string): number {
   return Math.max(0, Math.floor((now - Date.parse(publishedAt)) / DAY_MS));
 }
 
+/** The persona's strong opinion for a decision situation ('' if none). */
+function stanceOf(persona: Persona, appliesTo: string): string {
+  const opinion = persona.strongOpinions.find(o => o.appliesTo === appliesTo);
+  return opinion ? `${persona.name}'s stance: ${opinion.stance}` : '';
+}
+
 function buildExplanation(kind: DecisionKind, scored: ScoredCandidate, reasons: string[]): string {
   const c = scored.components;
   const scores =
@@ -112,6 +120,8 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
   const limit = options.limit ?? 50;
   const runId = ulid(now);
   const startedAt = new Date(now).toISOString();
+  // The editorial pipeline is the AI Security persona's pipeline.
+  const persona: Persona = getPersona(null);
 
   const pending = getPendingDecisionCandidates(limit);
   if (pending.length === 0) {
@@ -138,7 +148,7 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
   for (const candidate of pending) {
     memoryByCandidate.set(
       candidate.id,
-      getRelevantMemory(null, candidate, { items: memoryItems })
+      getRelevantMemory(null, candidate, { items: memoryItems, persona })
     );
   }
 
@@ -156,7 +166,8 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
       now,
       memoryTitles,
       corroborationCves,
-      memory: memoryByCandidate.get(candidate.id)
+      memory: memoryByCandidate.get(candidate.id),
+      persona
     })
   );
   scored.sort(comparePriority);
@@ -202,14 +213,23 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
       hardRejected = true;
       kind = 'rejected';
       reasons.push(`Stale: published ${ageDays(now, s.candidate.publishedAt)} days ago (> 30 days).`);
+    } else if (s.flags.offPersona) {
+      // The persona's topics-to-avoid: unrelated content is rejected outright.
+      hardRejected = true;
+      kind = 'rejected';
+      reasons.push(
+        `Off-persona: "${s.flags.offPersona}" is on ${persona.name}'s topics to avoid. ${stanceOf(persona, 'hype')}`.trim()
+      );
     } else if (s.flags.marketing) {
       hardRejected = true;
       kind = 'rejected';
-      reasons.push('Low-quality marketing content.');
+      reasons.push(`Low-quality marketing content. ${stanceOf(persona, 'hype')}`.trim());
     } else if (s.flags.unsupported) {
       hardRejected = true;
       kind = 'rejected';
-      reasons.push('Unsupported claims: no identifiers (CVE/GHSA/arXiv) and thin evidence.');
+      reasons.push(
+        `Unsupported claims: no identifiers (CVE/GHSA/arXiv) and thin evidence. ${stanceOf(persona, 'unsupported')}`.trim()
+      );
     } else if (s.flags.followUpWithoutNewInfo) {
       // An evolving story may only publish with meaningful new information.
       hardRejected = true;
@@ -249,6 +269,12 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
       reasons.push(
         `Follow-up on "${s.flags.meaningfulFollowUp.story}" — ${s.flags.meaningfulFollowUp.relation} the prior stance with new information.`
       );
+    }
+    if (kind !== 'rejected') {
+      const themes = themeHitsOf(persona, textOf(s.candidate));
+      if (themes.length > 0) {
+        reasons.push(`On-theme for ${persona.name}: ${themes.join(', ')}.`);
+      }
     }
 
     entries.push({ scored: s, kind, reasons });
@@ -304,7 +330,8 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
     });
 
     // Durable memory: accepted content becomes long-term + editorial memory
-    // (persona scope), keyed to the story subject for follow-up accumulation.
+    // (persona scope), keyed to the story subject for follow-up accumulation,
+    // and tagged with the persona's recurring themes it touches.
     if (entry.kind === 'accepted') {
       recordMemoryForAccepted(null, entry.scored.candidate, {
         nowMs: now,
@@ -313,7 +340,8 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
               subject: entry.scored.flags.meaningfulFollowUp.story,
               relation: entry.scored.flags.meaningfulFollowUp.relation
             }
-          : undefined
+          : undefined,
+        persona
       });
     }
 

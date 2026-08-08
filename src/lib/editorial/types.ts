@@ -28,6 +28,8 @@ export interface EditorialFlags {
   duplicateTitleSimilarity?: number;
   /** Semantic near-duplicate found by the memory ladder (level 4). */
   memoryNearDuplicate?: string;
+  /** Off-persona topic signal (the matched avoid term) — hard reject. */
+  offPersona?: string;
   /** Level-3 story overlap without meaningful new information (hard reject). */
   followUpWithoutNewInfo?: string;
   /** Level-3 story overlap WITH meaningful new information (allowed). */

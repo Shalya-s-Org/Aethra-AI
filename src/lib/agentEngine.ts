@@ -34,6 +34,7 @@ import {
 } from './db';
 import { ulid } from './ids';
 import { linkRelatedPosts, recordMemoryForAccepted } from './memory';
+import { getPersona, validatePost } from './persona';
 import { canonicalizeSourceUrl } from './urls';
 
 // ---------------------------------------------------------------------------
@@ -296,6 +297,13 @@ function finishRun(state: BackendAgentInstance, engine: EngineMeta, now: number)
         relatedPosts: state.posts.slice(0, 1).map(p => p.title),
         publicationId: pubId
       };
+      // Persona-driven final quality check (informational on the snapshot).
+      newPost.quality = validatePost(getPersona(state.config.domain), {
+        title: newPost.title,
+        text: newPost.text,
+        rationale: newPost.rationale,
+        opinion: newPost.opinion
+      });
 
       try {
         insertPost({

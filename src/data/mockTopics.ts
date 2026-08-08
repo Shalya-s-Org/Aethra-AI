@@ -33,6 +33,8 @@ export interface Post {
   /** True for static demo/seed posts. Demo posts are excluded from the judged
    *  GET /api/agent/feed API and never count toward duplicate prevention. */
   demoOnly?: boolean;
+  /** Persona quality-validation report (informational; not part of the feed). */
+  quality?: import('../lib/persona/validate').PostQualityReport;
 }
 
 export interface MemoryNode {
