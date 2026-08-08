@@ -100,7 +100,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
           {isInitialized && (
             <button
               onClick={resetAgent}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors text-[10px] font-display uppercase tracking-widest font-bold cursor-pointer"
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded border border-cyber-red/20 text-cyber-red hover:bg-cyber-red/10 transition-colors text-[10px] font-display uppercase tracking-widest font-bold cursor-pointer"
             >
               <Power className="w-3.5 h-3.5" />
               Reset Analyst

@@ -364,11 +364,11 @@ export const DashboardOverview: React.FC = () => {
           <div className={cn(
             "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
             isFlowActive('filtering') 
-              ? "bg-red-500/10 border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.2)] scale-105 animate-pulse"
+              ? "bg-cyber-red/10 border-cyber-red/50 shadow-[0_0_15px_rgba(239,68,68,0.2)] scale-105 animate-pulse"
               : "bg-black/40 border-white/5 opacity-70"
           )}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Rejected</div>
-            <div className="font-display text-sm font-bold text-red-400 mt-0.5">{pipelineStats.filterCount}</div>
+            <div className="font-display text-sm font-bold text-cyber-red mt-0.5">{pipelineStats.filterCount}</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
@@ -469,7 +469,7 @@ export const DashboardOverview: React.FC = () => {
                       <span className={cn(
                         "px-1 py-0.2 rounded text-[7px] font-display uppercase tracking-widest font-bold border flex-shrink-0",
                         cand.recommendation === 'Accept' && "bg-cyber-emerald/10 text-cyber-emerald border-cyber-emerald/25",
-                        cand.recommendation === 'Reject' && "bg-red-500/10 text-red-400 border-red-500/25",
+                        cand.recommendation === 'Reject' && "bg-cyber-red/10 text-cyber-red border-cyber-red/25",
                         cand.recommendation === 'Investigate' && "bg-yellow-500/10 text-yellow-400 border-yellow-500/25"
                       )}>
                         {cand.recommendation === 'Accept' ? 'Publish' : cand.recommendation === 'Reject' ? 'Rejected' : 'Investigating'}
@@ -484,7 +484,7 @@ export const DashboardOverview: React.FC = () => {
                     </div>
 
                     {cand.recommendation === 'Reject' && cand.rejectionReason && (
-                      <p className="text-[8.5px] text-red-400 leading-normal pl-2 border-l border-red-500/30">
+                      <p className="text-[8.5px] text-cyber-red leading-normal pl-2 border-l border-cyber-red/30">
                         {cand.rejectionReason}
                       </p>
                     )}
@@ -499,7 +499,7 @@ export const DashboardOverview: React.FC = () => {
             <div>
               <div className="mb-4">
                 <h4 className="font-display text-xs font-bold tracking-wider text-white uppercase flex items-center gap-1.5">
-                  <ShieldAlert className="w-4 h-4 text-red-400" />
+                  <ShieldAlert className="w-4 h-4 text-cyber-red" />
                   Rejected Topics Today
                 </h4>
                 <p className="text-[8px] text-gray-500 uppercase tracking-widest font-mono mt-0.5">
@@ -509,16 +509,16 @@ export const DashboardOverview: React.FC = () => {
 
               <div className="space-y-2.5 max-h-[250px] overflow-y-auto pr-1">
                 {rejectedTodayList.map((rej, idx) => (
-                  <div key={`rej-${idx}-${rej.title.slice(0, 10)}`} className="p-3 rounded bg-black/40 border border-red-500/10 text-[9px] space-y-2">
+                  <div key={`rej-${idx}-${rej.title.slice(0, 10)}`} className="p-3 rounded bg-black/40 border border-cyber-red/10 text-[9px] space-y-2">
                     <div className="flex justify-between items-start gap-1">
                       <span className="font-display font-medium text-white leading-relaxed">
                         {rej.title}
                       </span>
-                      <span className="px-1.5 py-0.2 rounded text-[7px] font-mono uppercase bg-red-500/10 text-red-400 border border-red-500/20 flex-shrink-0">
+                      <span className="px-1.5 py-0.2 rounded text-[7px] font-mono uppercase bg-cyber-red/10 text-cyber-red border border-cyber-red/20 flex-shrink-0">
                         Rejected
                       </span>
                     </div>
-                    <p className="text-[8.5px] text-red-400 leading-normal pl-2 border-l border-red-500/30">
+                    <p className="text-[8.5px] text-cyber-red leading-normal pl-2 border-l border-cyber-red/30">
                       {rej.reason}
                     </p>
                   </div>
@@ -678,7 +678,7 @@ export const DashboardOverview: React.FC = () => {
               </div>
             </div>
             <div className="text-[8px] text-gray-500 font-mono uppercase tracking-widest leading-relaxed">
-              Rejecting filter: <strong className="text-red-400 font-normal">{heuristics.filters}</strong>
+              Rejecting filter: <strong className="text-cyber-red font-normal">{heuristics.filters}</strong>
             </div>
           </GlassCard>
 
@@ -947,8 +947,8 @@ export const DashboardOverview: React.FC = () => {
                   {/* Why Not This competing option */}
                   <div className="border-t border-white/10 pt-4 font-mono text-[9px] space-y-2">
                     <span className="text-white block font-display uppercase tracking-widest font-bold">Why Not This? Competing Audit</span>
-                    <div className="p-3 rounded border border-red-500/20 bg-red-500/5 space-y-1">
-                      <div className="flex justify-between text-[8px] text-red-400">
+                    <div className="p-3 rounded border border-cyber-red/20 bg-cyber-red/5 space-y-1">
+                      <div className="flex justify-between text-[8px] text-cyber-red">
                         <span>Rejected Competing Alternative</span>
                         <span>Outside Editorial Policy</span>
                       </div>

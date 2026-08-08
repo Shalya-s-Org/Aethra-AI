@@ -79,7 +79,7 @@ export const EditorialDecisions: React.FC = () => {
                         {isAccepted ? (
                           <CheckCircle2 className="w-4 h-4 text-cyber-emerald" />
                         ) : (
-                          <XCircle className="w-4 h-4 text-red-400" />
+                          <XCircle className="w-4 h-4 text-cyber-red" />
                         )}
                       </div>
                       <div className="truncate">
@@ -120,7 +120,7 @@ export const EditorialDecisions: React.FC = () => {
                       <span className="text-gray-500 text-[8px] uppercase block md:hidden mb-0.5">Memory Match</span>
                       <span className={cn(
                         "font-semibold",
-                        isAccepted ? "text-cyber-emerald" : dec.category === 'Duplicate' ? "text-red-400 font-bold" : "text-gray-400"
+                        isAccepted ? "text-cyber-emerald" : dec.category === 'Duplicate' ? "text-cyber-red font-bold" : "text-gray-400"
                       )}>{memoryMatch}</span>
                     </div>
 
@@ -131,7 +131,7 @@ export const EditorialDecisions: React.FC = () => {
                         "px-1.5 py-0.5 rounded text-[8px] font-display uppercase tracking-widest font-bold border",
                         isAccepted 
                           ? "bg-cyber-emerald/15 text-cyber-emerald border-cyber-emerald/30" 
-                          : "bg-red-500/15 text-red-400 border-red-500/30"
+                          : "bg-cyber-red/15 text-cyber-red border-cyber-red/30"
                       )}>
                         {isAccepted ? 'OK' : 'REJ'}
                       </span>
@@ -165,7 +165,7 @@ export const EditorialDecisions: React.FC = () => {
                             <span className="text-white block uppercase tracking-wider mb-1 font-display font-semibold">Memory Index Lookup</span>
                             <span>Proximity matching: Vector similarity score evaluated at {memoryMatch}. Threshold configuration limits set to 70%.</span>
                           </div>
-                          <span className={cn("font-bold uppercase mt-2 block tracking-widest text-[8px]", isAccepted ? "text-cyber-emerald" : "text-red-400")}>
+                          <span className={cn("font-bold uppercase mt-2 block tracking-widest text-[8px]", isAccepted ? "text-cyber-emerald" : "text-cyber-red")}>
                             Collision Test: {isAccepted ? "Cleared (Novel Topic)" : "Failed (Duplicate Pattern)"}
                           </span>
                         </div>
