@@ -73,10 +73,20 @@ export function makeCandidate(input: CandidateInput): DiscoveredCandidate | null
   };
 }
 
+export interface AdapterFetchDetail {
+  url: string;
+  status: 'success' | 'failure';
+  itemCount?: number;
+  error?: string;
+}
+
 export interface AdapterResult {
   candidates: DiscoveredCandidate[];
-  /** Present when this source failed; candidates is then empty. */
+  /** Present when this source failed outright; candidates is then empty. */
   error?: string;
+  /** Per-URL fetch outcomes (multi-URL adapters). Falls back to one row for
+   *  adapter.url when omitted. */
+  fetches?: AdapterFetchDetail[];
 }
 
 /**

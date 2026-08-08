@@ -1,6 +1,6 @@
 import { fetchText } from '../http';
 import { parseFeedItems } from '../xml';
-import { makeCandidate, type AdapterResult, type DiscoveryAdapter } from '../types';
+import { makeCandidate, type AdapterFetchDetail, type AdapterResult, type DiscoveredCandidate, type DiscoveryAdapter } from '../types';
 
 // Allowlisted official AI-lab / security-team feeds. The list is configurable
 // via AETHRA_LAB_FEEDS (comma-separated https URLs) — but only https URLs are
@@ -29,8 +29,8 @@ function configuredLabFeeds(): string[] {
 }
 
 /** Pure parse — exported for offline fixture tests. */
-export function parseFeed(xml: string, sourceName: string): ReturnType<typeof makeCandidate>[] {
-  const candidates = [];
+export function parseFeed(xml: string, sourceName: string): DiscoveredCandidate[] {
+  const candidates: DiscoveredCandidate[] = [];
   for (const item of parseFeedItems(xml)) {
     if (!item.title || !item.link) continue;
     const candidate = makeCandidate({
@@ -57,26 +57,27 @@ export const labFeedsAdapter: DiscoveryAdapter = {
     const feeds = configuredLabFeeds();
     if (feeds.length === 0) return { candidates: [], error: 'No allowlisted lab feeds configured.' };
 
-    const all: ReturnType<typeof makeCandidate>[] = [];
-    const errors: string[] = [];
+    const all: DiscoveredCandidate[] = [];
+    const fetches: AdapterFetchDetail[] = [];
     for (const feedUrl of feeds) {
       const result = await fetchText(fetchImpl, feedUrl, { retries: 1 });
       if (!result.ok) {
-        errors.push(`${feedUrl}: ${result.text || `HTTP ${result.status}`}`);
+        fetches.push({ url: feedUrl, status: 'failure', error: result.error ?? 'unknown fetch error' });
         continue;
       }
-      try {
-        all.push(...parseFeed(result.text, feedUrl));
-      } catch (err) {
-        errors.push(`${feedUrl}: ${err instanceof Error ? err.message : String(err)}`);
-      }
+      const items = parseFeed(result.text, feedUrl);
+      all.push(...items);
+      fetches.push({ url: feedUrl, status: 'success', itemCount: items.length });
     }
 
-    if (errors.length > 0 && all.length === 0) {
-      return { candidates: [], error: errors.join('; ') };
+    const failures = fetches.filter(f => f.status === 'failure');
+    if (failures.length > 0 && all.length === 0) {
+      return {
+        candidates: [],
+        error: failures.map(f => `${f.url}: ${f.error}`).join('; '),
+        fetches
+      };
     }
-    // Partial success: surface candidates; the runner records one fetch row
-    // (success) — per-feed detail lives in the error string only if total.
-    return { candidates: all };
+    return { candidates: all, fetches };
   }
 };

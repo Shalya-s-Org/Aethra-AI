@@ -1,0 +1,25 @@
+[
+  {
+    "ghsa_id": "GHSA-8v4g-5r6p-9x3m",
+    "cve_id": "CVE-2026-12345",
+    "summary": "Heap overflow in model serializer allows remote code execution when loading untrusted checkpoints.",
+    "severity": "high",
+    "published_at": "2026-07-20T14:30:00Z",
+    "html_url": "https://github.com/advisories/GHSA-8v4g-5r6p-9x3m",
+    "vulnerabilities": [
+      { "package": { "name": "transformers", "ecosystem": "pypi" }, "severity": "high" }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-qq2x-7p4m-w9v2",
+    "summary": "Token leakage through debug logging in SDK client.",
+    "severity": "moderate",
+    "published_at": "2026-07-18T09:00:00Z",
+    "html_url": "http://github.com/advisories/GHSA-qq2x-7p4m-w9v2"
+  },
+  {
+    "ghsa_id": "GHSA-0000-0000-0000",
+    "summary": "",
+    "published_at": ""
+  }
+]
