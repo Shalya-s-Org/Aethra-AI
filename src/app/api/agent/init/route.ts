@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { initializeAgentInstance } from '../../../../utils/agentEngine';
+import { initializeAgentInstance } from '../../../../lib/agentEngine';
 
 // The init payload is a small persona config; a tight cap blocks oversized-body
 // memory abuse while leaving generous room for legitimate mission strings.

@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import type { Topic, Post, MemoryNode } from '../data/mockTopics';
-import type { BackendAgentInstance } from '../utils/agentEngine';
+import type { BackendAgentInstance } from '../lib/agentTypes';
 
 export type AgentStatus = 'inactive' | 'idle' | 'scanning' | 'filtering' | 'reasoning' | 'memory_check' | 'writing' | 'publishing' | 'learning';
 

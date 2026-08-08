@@ -1,0 +1,768 @@
+import { DatabaseSync } from 'node:sqlite';
+import fs from 'node:fs';
+import path from 'node:path';
+import type { BackendAgentInstance, EngineMeta } from './agentTypes';
+import { ulid } from './ids';
+
+// Durable persistence via Node's built-in SQLite (node:sqlite — Node 24).
+// Zero extra dependencies, real SQL, WAL mode, and a versioned migration
+// runner (schema_migrations table) so the schema can evolve cleanly.
+//
+// Schema overview (see MIGRATIONS[0]):
+//   agents               persona + engine timestamps + client snapshot blob
+//   topics               scanned candidate topics (canonical dedup key)
+//   sources              canonical HTTPS source URLs per topic
+//   posts                published feed entries (ULID PK, unique per topic)
+//   editorial_decisions  accept/reject verdicts with scores + explanation
+//   persona_memory       knowledge-graph nodes
+//   agent_runs           durable job history for each pipeline run
+//
+// Post/publication timestamps are ISO-8601 UTC strings. `next_run_at` is the
+// scheduler's internal epoch-ms column (not an exposed timestamp).
+
+export interface AgentRow {
+  state: BackendAgentInstance;
+  engine: EngineMeta;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TopicRow {
+  id: string;
+  agentId: string;
+  title: string;
+  canonicalSourceUrl: string;
+  category: string | null;
+  sourceName: string | null;
+  credibilityScore: number | null;
+  trendScore: number | null;
+  noveltyScore: number | null;
+  importanceScore: number | null;
+  confidenceScore: number | null;
+  recommendation: string | null;
+  rejectionReason: string | null;
+  detailedAnalysis: string | null;
+  opinion: string | null;
+  freshness: string | null;
+  createdAt: string;
+}
+
+export interface FeedPost {
+  id: string;
+  createdAt: string; // ISO UTC
+  title: string;
+  body: string;
+  opinion: string;
+  rationale: string;
+  topicId: string | null;
+  sources: string[];
+}
+
+export interface DecisionRow {
+  id: string;
+  agentId: string;
+  topicId: string;
+  decision: 'accept' | 'reject';
+  credibilityScore: number | null;
+  noveltyScore: number | null;
+  importanceScore: number | null;
+  confidenceScore: number | null;
+  explanation: string;
+  decidedAt: string; // ISO UTC
+}
+
+export interface MemoryRow {
+  id: string;
+  agentId: string;
+  nodeLabel: string;
+  nodeGroup: string;
+  details: string | null;
+  connections: string[];
+  createdAt: string; // ISO UTC
+}
+
+export interface RunRow {
+  id: string;
+  agentId: string;
+  topicId: string | null;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'skipped';
+  outcome: string | null;
+  startedAt: string; // ISO UTC
+  finishedAt: string | null;
+  error: string | null;
+  createdAt: string; // ISO UTC
+}
+
+// ---------------------------------------------------------------------------
+// Migrations
+// ---------------------------------------------------------------------------
+
+interface Migration {
+  id: string;
+  sql: string;
+}
+
+// v1: initial relational schema. Deliberately DROPs the old single-table
+// `agents` blob (pre-migration data is disposable hackathon state).
+const MIGRATIONS: Migration[] = [
+  {
+    id: '001_initial_relational_schema',
+    sql: `
+      DROP TABLE IF EXISTS agents;
+
+      CREATE TABLE agents (
+        id          TEXT PRIMARY KEY,
+        name        TEXT NOT NULL,
+        role        TEXT NOT NULL,
+        domain      TEXT NOT NULL,
+        mission     TEXT NOT NULL,
+        frequency   TEXT NOT NULL,
+        style       TEXT NOT NULL,
+        status      TEXT NOT NULL DEFAULT 'idle',
+        state_json  TEXT NOT NULL,
+        engine_json TEXT NOT NULL,
+        next_run_at INTEGER NOT NULL,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_agents_due ON agents (next_run_at);
+
+      CREATE TABLE topics (
+        id                   TEXT PRIMARY KEY,
+        agent_id             TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        title                TEXT NOT NULL,
+        canonical_source_url TEXT NOT NULL,
+        category             TEXT,
+        source_name          TEXT,
+        credibility_score    INTEGER,
+        trend_score          INTEGER,
+        novelty_score        INTEGER,
+        importance_score     INTEGER,
+        confidence_score     INTEGER,
+        recommendation       TEXT,
+        rejection_reason     TEXT,
+        detailed_analysis    TEXT,
+        opinion              TEXT,
+        freshness            TEXT,
+        raw_json             TEXT NOT NULL,
+        created_at           TEXT NOT NULL,
+        UNIQUE (agent_id, canonical_source_url)
+      );
+      CREATE INDEX IF NOT EXISTS idx_topics_agent_created ON topics (agent_id, created_at DESC);
+
+      CREATE TABLE sources (
+        id          TEXT PRIMARY KEY,
+        agent_id    TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        topic_id    TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+        url         TEXT NOT NULL,
+        source_name TEXT,
+        UNIQUE (agent_id, url)
+      );
+      CREATE INDEX IF NOT EXISTS idx_sources_topic ON sources (agent_id, topic_id);
+
+      CREATE TABLE posts (
+        id               TEXT PRIMARY KEY,
+        agent_id         TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        topic_id         TEXT REFERENCES topics(id) ON DELETE SET NULL,
+        title            TEXT NOT NULL,
+        body             TEXT NOT NULL,
+        opinion          TEXT,
+        rationale        TEXT,
+        confidence_score INTEGER,
+        category         TEXT,
+        importance_score INTEGER,
+        novelty_score    INTEGER,
+        publication_id   TEXT,
+        published_at     TEXT NOT NULL,
+        UNIQUE (agent_id, topic_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_posts_agent_published ON posts (agent_id, published_at DESC);
+
+      CREATE TABLE editorial_decisions (
+        id                TEXT PRIMARY KEY,
+        agent_id          TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        topic_id          TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
+        decision          TEXT NOT NULL CHECK (decision IN ('accept','reject')),
+        credibility_score INTEGER,
+        novelty_score     INTEGER,
+        importance_score  INTEGER,
+        confidence_score  INTEGER,
+        explanation       TEXT NOT NULL,
+        decided_at        TEXT NOT NULL,
+        UNIQUE (agent_id, topic_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_decisions_agent_decided ON editorial_decisions (agent_id, decided_at DESC);
+
+      CREATE TABLE persona_memory (
+        id               TEXT PRIMARY KEY,
+        agent_id         TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        node_label       TEXT NOT NULL,
+        node_group       TEXT NOT NULL,
+        details          TEXT,
+        connections_json TEXT NOT NULL,
+        created_at       TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_memory_agent ON persona_memory (agent_id, created_at DESC);
+
+      CREATE TABLE agent_runs (
+        id          TEXT PRIMARY KEY,
+        agent_id    TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        topic_id    TEXT REFERENCES topics(id) ON DELETE SET NULL,
+        status      TEXT NOT NULL CHECK (status IN ('queued','running','completed','failed','skipped')),
+        outcome     TEXT,
+        started_at  TEXT NOT NULL,
+        finished_at TEXT,
+        error       TEXT,
+        created_at  TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_runs_agent_started ON agent_runs (agent_id, started_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_runs_agent_status ON agent_runs (agent_id, status);
+    `
+  }
+];
+
+function applyMigrations(db: DatabaseSync): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id         TEXT PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    )
+  `);
+  const applied = new Set(
+    db.prepare('SELECT id FROM schema_migrations').all().map(r => String(r.id))
+  );
+  for (const migration of MIGRATIONS) {
+    if (applied.has(migration.id)) continue;
+    db.exec('BEGIN');
+    try {
+      db.exec(migration.sql);
+      db.prepare('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)').run(
+        migration.id,
+        new Date().toISOString()
+      );
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Connection (lazy singleton; safe during `next build` and read-only FS)
+// ---------------------------------------------------------------------------
+
+let db: DatabaseSync | null = null;
+
+export function getDb(): DatabaseSync {
+  if (db) return db;
+  const dbPath = process.env.AETHRA_DB_PATH || path.join(process.cwd(), '.data', 'aethra.db');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const connection = new DatabaseSync(dbPath);
+  connection.exec('PRAGMA journal_mode = WAL;');
+  connection.exec('PRAGMA busy_timeout = 5000;');
+  connection.exec('PRAGMA foreign_keys = ON;');
+  applyMigrations(connection);
+  db = connection;
+  return connection;
+}
+
+/** Close the connection (used by tests to prove durability across reopen). */
+export function closeDb(): void {
+  if (db) {
+    db.close();
+    db = null;
+  }
+}
+
+const iso = (ms: number): string => new Date(ms).toISOString();
+
+// ---------------------------------------------------------------------------
+// Agents
+// ---------------------------------------------------------------------------
+
+/** Upsert an agent row (create + update). Config columns are mirrored from
+ *  the snapshot for queryability; state_json remains the client contract. */
+export function putAgentRow(
+  state: BackendAgentInstance,
+  engine: EngineMeta,
+  updatedAt: number = Date.now()
+): void {
+  const d = getDb();
+  d.prepare(
+    `INSERT INTO agents (id, name, role, domain, mission, frequency, style, status,
+                         state_json, engine_json, next_run_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       name        = excluded.name,
+       role        = excluded.role,
+       domain      = excluded.domain,
+       mission     = excluded.mission,
+       frequency   = excluded.frequency,
+       style       = excluded.style,
+       status      = excluded.status,
+       state_json  = excluded.state_json,
+       engine_json = excluded.engine_json,
+       next_run_at = excluded.next_run_at,
+       updated_at  = excluded.updated_at`
+  ).run(
+    state.agentId,
+    state.config.name,
+    state.config.role,
+    state.config.domain,
+    state.config.mission,
+    state.config.frequency,
+    state.config.style,
+    state.status,
+    JSON.stringify(state),
+    JSON.stringify(engine),
+    engine.nextRunAt,
+    iso(updatedAt),
+    iso(updatedAt)
+  );
+}
+
+export function getAgentRow(agentId: string): AgentRow | null {
+  const row = getDb()
+    .prepare('SELECT state_json, engine_json, created_at, updated_at FROM agents WHERE id = ?')
+    .get(agentId);
+  if (!row) return null;
+  return {
+    state: JSON.parse(String(row.state_json)) as BackendAgentInstance,
+    engine: JSON.parse(String(row.engine_json)) as EngineMeta,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+export function deleteAgentRow(agentId: string): void {
+  getDb().prepare('DELETE FROM agents WHERE id = ?').run(agentId);
+}
+
+/** Scheduler's "due jobs" query — agents whose next run is due. */
+export function listDueAgentIds(now: number): string[] {
+  const rows = getDb().prepare('SELECT id FROM agents WHERE next_run_at <= ?').all(now);
+  return rows.map(r => String(r.id));
+}
+
+// ---------------------------------------------------------------------------
+// Topics
+// ---------------------------------------------------------------------------
+
+export interface UpsertTopicInput {
+  agentId: string;
+  title: string;
+  canonicalSourceUrl: string;
+  category: string | null;
+  sourceName: string | null;
+  credibilityScore: number | null;
+  trendScore: number | null;
+  noveltyScore: number | null;
+  importanceScore: number | null;
+  confidenceScore: number | null;
+  recommendation: string | null;
+  rejectionReason: string | null;
+  detailedAnalysis: string | null;
+  opinion: string | null;
+  freshness: string | null;
+  rawJson: string;
+  createdAtMs: number;
+}
+
+/** Insert a topic if this agent has never scanned its canonical source before;
+ *  otherwise return the existing topic id. This is the DB-level dedup key for
+ *  "same canonical topic/source per agent". */
+export function upsertTopicRow(input: UpsertTopicInput): string {
+  const d = getDb();
+  const existing = d
+    .prepare('SELECT id FROM topics WHERE agent_id = ? AND canonical_source_url = ?')
+    .get(input.agentId, input.canonicalSourceUrl);
+  if (existing) return String(existing.id);
+
+  const id = ulid();
+  d.prepare(
+    `INSERT INTO topics (id, agent_id, title, canonical_source_url, category, source_name,
+                         credibility_score, trend_score, novelty_score, importance_score,
+                         confidence_score, recommendation, rejection_reason, detailed_analysis,
+                         opinion, freshness, raw_json, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    input.agentId,
+    input.title,
+    input.canonicalSourceUrl,
+    input.category,
+    input.sourceName,
+    input.credibilityScore,
+    input.trendScore,
+    input.noveltyScore,
+    input.importanceScore,
+    input.confidenceScore,
+    input.recommendation,
+    input.rejectionReason,
+    input.detailedAnalysis,
+    input.opinion,
+    input.freshness,
+    input.rawJson,
+    iso(input.createdAtMs)
+  );
+  return id;
+}
+
+export function getTopicRow(agentId: string, topicId: string): TopicRow | null {
+  const row = getDb()
+    .prepare('SELECT * FROM topics WHERE agent_id = ? AND id = ?')
+    .get(agentId, topicId);
+  if (!row) return null;
+  return mapTopicRow(row);
+}
+
+function mapTopicRow(row: Record<string, unknown>): TopicRow {
+  return {
+    id: String(row.id),
+    agentId: String(row.agent_id),
+    title: String(row.title),
+    canonicalSourceUrl: String(row.canonical_source_url),
+    category: row.category == null ? null : String(row.category),
+    sourceName: row.source_name == null ? null : String(row.source_name),
+    credibilityScore: row.credibility_score == null ? null : Number(row.credibility_score),
+    trendScore: row.trend_score == null ? null : Number(row.trend_score),
+    noveltyScore: row.novelty_score == null ? null : Number(row.novelty_score),
+    importanceScore: row.importance_score == null ? null : Number(row.importance_score),
+    confidenceScore: row.confidence_score == null ? null : Number(row.confidence_score),
+    recommendation: row.recommendation == null ? null : String(row.recommendation),
+    rejectionReason: row.rejection_reason == null ? null : String(row.rejection_reason),
+    detailedAnalysis: row.detailed_analysis == null ? null : String(row.detailed_analysis),
+    opinion: row.opinion == null ? null : String(row.opinion),
+    freshness: row.freshness == null ? null : String(row.freshness),
+    createdAt: String(row.created_at)
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sources (canonical HTTPS URLs)
+// ---------------------------------------------------------------------------
+
+export interface SourceInput {
+  agentId: string;
+  topicId: string;
+  url: string;
+  sourceName: string | null;
+}
+
+/** Idempotent insert: a (agent, url) pair is stored once. */
+export function insertSource(input: SourceInput): void {
+  getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO sources (id, agent_id, topic_id, url, source_name)
+       VALUES (?, ?, ?, ?, ?)`
+    )
+    .run(ulid(), input.agentId, input.topicId, input.url, input.sourceName);
+}
+
+function getSourceUrlsForTopic(agentId: string, topicId: string): string[] {
+  if (!topicId) return [];
+  const rows = getDb()
+    .prepare('SELECT url FROM sources WHERE agent_id = ? AND topic_id = ? ORDER BY rowid')
+    .all(agentId, topicId);
+  return rows.map(r => String(r.url));
+}
+
+// ---------------------------------------------------------------------------
+// Posts
+// ---------------------------------------------------------------------------
+
+export interface PostInput {
+  id: string; // ULID, generated by the caller
+  agentId: string;
+  topicId: string | null;
+  title: string;
+  body: string;
+  opinion: string | null;
+  rationale: string | null;
+  confidenceScore: number | null;
+  category: string | null;
+  importanceScore: number | null;
+  noveltyScore: number | null;
+  publicationId: string | null;
+  publishedAtMs: number;
+}
+
+/** Insert a published post. Throws if (agent_id, topic_id) already has a post
+ *  — the DB-level duplicate-publication backstop. */
+export function insertPost(input: PostInput): void {
+  getDb()
+    .prepare(
+      `INSERT INTO posts (id, agent_id, topic_id, title, body, opinion, rationale,
+                          confidence_score, category, importance_score, novelty_score,
+                          publication_id, published_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      input.id,
+      input.agentId,
+      input.topicId,
+      input.title,
+      input.body,
+      input.opinion,
+      input.rationale,
+      input.confidenceScore,
+      input.category,
+      input.importanceScore,
+      input.noveltyScore,
+      input.publicationId,
+      iso(input.publishedAtMs)
+    );
+}
+
+/** Feed ordering: newest first (uses idx_posts_agent_published). */
+export function getPostsByAgent(agentId: string): FeedPost[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT id, published_at, title, body, opinion, rationale, topic_id
+       FROM posts WHERE agent_id = ? ORDER BY published_at DESC, id DESC`
+    )
+    .all(agentId);
+  return rows.map(r => {
+    const topicId = r.topic_id == null ? null : String(r.topic_id);
+    return {
+      id: String(r.id),
+      createdAt: String(r.published_at),
+      title: String(r.title),
+      body: String(r.body),
+      opinion: r.opinion == null ? '' : String(r.opinion),
+      rationale: r.rationale == null ? '' : String(r.rationale),
+      topicId,
+      sources: getSourceUrlsForTopic(agentId, topicId ?? '')
+    };
+  });
+}
+
+export function countPosts(agentId: string): number {
+  const row = getDb()
+    .prepare('SELECT COUNT(*) AS n FROM posts WHERE agent_id = ?')
+    .get(agentId);
+  return Number((row as { n: number }).n);
+}
+
+export function hasPublishedTopic(agentId: string, topicId: string): boolean {
+  const row = getDb()
+    .prepare('SELECT 1 FROM posts WHERE agent_id = ? AND topic_id = ? LIMIT 1')
+    .get(agentId, topicId);
+  return row != null;
+}
+
+/** True if this agent already published any post whose topic carries one of
+ *  the given canonical source URLs (cross-topic duplicate prevention). */
+export function findPublishedByCanonicalSource(agentId: string, canonicalUrls: string[]): boolean {
+  const urls = canonicalUrls.filter(Boolean);
+  if (urls.length === 0) return false;
+  const placeholders = urls.map(() => '?').join(', ');
+  const row = getDb()
+    .prepare(
+      `SELECT 1 FROM posts p
+       JOIN topics t ON t.id = p.topic_id
+       WHERE p.agent_id = ? AND t.canonical_source_url IN (${placeholders})
+       LIMIT 1`
+    )
+    .get(agentId, ...urls);
+  return row != null;
+}
+
+// ---------------------------------------------------------------------------
+// Editorial decisions
+// ---------------------------------------------------------------------------
+
+export interface DecisionInput {
+  agentId: string;
+  topicId: string;
+  decision: 'accept' | 'reject';
+  credibilityScore: number | null;
+  noveltyScore: number | null;
+  importanceScore: number | null;
+  confidenceScore: number | null;
+  explanation: string;
+  decidedAtMs: number;
+}
+
+/** Insert a decision. Throws on (agent_id, topic_id) duplicates. */
+export function insertDecision(input: DecisionInput): void {
+  getDb()
+    .prepare(
+      `INSERT INTO editorial_decisions (id, agent_id, topic_id, decision, credibility_score,
+                                        novelty_score, importance_score, confidence_score,
+                                        explanation, decided_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      ulid(),
+      input.agentId,
+      input.topicId,
+      input.decision,
+      input.credibilityScore,
+      input.noveltyScore,
+      input.importanceScore,
+      input.confidenceScore,
+      input.explanation,
+      iso(input.decidedAtMs)
+    );
+}
+
+export function hasDecision(agentId: string, topicId: string): boolean {
+  const row = getDb()
+    .prepare('SELECT 1 FROM editorial_decisions WHERE agent_id = ? AND topic_id = ? LIMIT 1')
+    .get(agentId, topicId);
+  return row != null;
+}
+
+export function getDecisionsByAgent(agentId: string): DecisionRow[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT id, agent_id, topic_id, decision, credibility_score, novelty_score,
+              importance_score, confidence_score, explanation, decided_at
+       FROM editorial_decisions WHERE agent_id = ? ORDER BY decided_at DESC`
+    )
+    .all(agentId);
+  return rows.map(r => ({
+    id: String(r.id),
+    agentId: String(r.agent_id),
+    topicId: String(r.topic_id),
+    decision: String(r.decision) as 'accept' | 'reject',
+    credibilityScore: r.credibility_score == null ? null : Number(r.credibility_score),
+    noveltyScore: r.novelty_score == null ? null : Number(r.novelty_score),
+    importanceScore: r.importance_score == null ? null : Number(r.importance_score),
+    confidenceScore: r.confidence_score == null ? null : Number(r.confidence_score),
+    explanation: String(r.explanation),
+    decidedAt: String(r.decided_at)
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Persona memory
+// ---------------------------------------------------------------------------
+
+export interface MemoryInput {
+  id: string;
+  agentId: string;
+  nodeLabel: string;
+  nodeGroup: string;
+  details: string | null;
+  connections: string[];
+  createdAtMs: number;
+}
+
+export function insertMemoryNode(input: MemoryInput): void {
+  getDb()
+    .prepare(
+      `INSERT OR REPLACE INTO persona_memory (id, agent_id, node_label, node_group, details, connections_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      input.id,
+      input.agentId,
+      input.nodeLabel,
+      input.nodeGroup,
+      input.details,
+      JSON.stringify(input.connections),
+      iso(input.createdAtMs)
+    );
+}
+
+export function getMemoryNodesByAgent(agentId: string): MemoryRow[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT id, agent_id, node_label, node_group, details, connections_json, created_at
+       FROM persona_memory WHERE agent_id = ? ORDER BY created_at DESC`
+    )
+    .all(agentId);
+  return rows.map(r => ({
+    id: String(r.id),
+    agentId: String(r.agent_id),
+    nodeLabel: String(r.node_label),
+    nodeGroup: String(r.node_group),
+    details: r.details == null ? null : String(r.details),
+    connections: JSON.parse(String(r.connections_json)) as string[],
+    createdAt: String(r.created_at)
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Agent runs (durable job history)
+// ---------------------------------------------------------------------------
+
+export interface RunInput {
+  agentId: string;
+  topicId: string | null;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'skipped';
+  outcome: string | null;
+  startedAtMs: number;
+}
+
+/** Create a run row; returns its ULID id. */
+export function insertRun(input: RunInput): string {
+  const id = ulid();
+  getDb()
+    .prepare(
+      `INSERT INTO agent_runs (id, agent_id, topic_id, status, outcome, started_at, finished_at, error, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      id,
+      input.agentId,
+      input.topicId,
+      input.status,
+      input.outcome,
+      iso(input.startedAtMs),
+      null,
+      null,
+      iso(input.startedAtMs)
+    );
+  return id;
+}
+
+export function updateRun(
+  runId: string,
+  fields: { status?: RunRow['status']; outcome?: string | null; finishedAtMs?: number; error?: string | null }
+): void {
+  const sets: string[] = [];
+  const values: Array<string | number | null> = [];
+  if (fields.status !== undefined) {
+    sets.push('status = ?');
+    values.push(fields.status);
+  }
+  if (fields.outcome !== undefined) {
+    sets.push('outcome = ?');
+    values.push(fields.outcome);
+  }
+  if (fields.error !== undefined) {
+    sets.push('error = ?');
+    values.push(fields.error);
+  }
+  if (fields.finishedAtMs !== undefined) {
+    sets.push('finished_at = ?');
+    values.push(iso(fields.finishedAtMs));
+  }
+  if (sets.length === 0) return;
+  values.push(runId);
+  getDb().prepare(`UPDATE agent_runs SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+}
+
+export function getRunsByAgent(agentId: string): RunRow[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT id, agent_id, topic_id, status, outcome, started_at, finished_at, error, created_at
+       FROM agent_runs WHERE agent_id = ? ORDER BY started_at DESC`
+    )
+    .all(agentId);
+  return rows.map(r => ({
+    id: String(r.id),
+    agentId: String(r.agent_id),
+    topicId: r.topic_id == null ? null : String(r.topic_id),
+    status: String(r.status) as RunRow['status'],
+    outcome: r.outcome == null ? null : String(r.outcome),
+    startedAt: String(r.started_at),
+    finishedAt: r.finished_at == null ? null : String(r.finished_at),
+    error: r.error == null ? null : String(r.error),
+    createdAt: String(r.created_at)
+  }));
+}
