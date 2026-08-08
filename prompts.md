@@ -2376,3 +2376,18 @@ Add semantic color tokens (cyber-red destructive, running/queued/failed status t
 
 ## Prompt 19
 Upgrade AnalyticsView with bullet charts for KPI-vs-target and accessibility fallbacks (visible text values, dashed line styles, pause/resume on the streaming area chart).
+
+ ## Prompt 20
+Audit this Next.js 16 project before editing. Read AGENTS.md and the relevant local Next.js 16 docs first.
+
+Replace the current in-memory autonomous-agent simulation with a production-oriented architecture for a 48-hour hackathon evaluation.
+
+Requirements:
+- Preserve POST /api/agent/init and GET /api/agent/feed?agentId=
+- GET /feed must remain read-only and must never generate content
+- Use durable persistence, not globalThis, setInterval, or browser state
+- Choose a practical database solution already compatible with this repo; explain the choice before implementation
+- Add a durable job/scheduler abstraction suitable for deployment, with a local-development fallback
+- Do not remove the existing dashboard unless necessary
+
+First provide a concise implementation plan and list the exact files you will add/change. Then implement it, run typecheck/build, and report results.
