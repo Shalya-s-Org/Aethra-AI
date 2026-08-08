@@ -227,7 +227,7 @@ export const DashboardOverview: React.FC = () => {
             exit={{ opacity: 0, y: -5 }}
             className="text-gray-300 font-mono italic"
           >
-            "{thinkingMessages[liveThinkingIndex]}"
+            {`"${thinkingMessages[liveThinkingIndex]}"`}
           </motion.span>
         </div>
 
@@ -578,6 +578,7 @@ export const DashboardOverview: React.FC = () => {
 
                 <div className="text-[8px] text-gray-400 pl-2 border-l border-cyber-cyan/30 mt-2 font-mono">
                   {"// Click card to open full decision replay logic"}
+                </div>
                 </div>
               </GlassCard>
             ))}

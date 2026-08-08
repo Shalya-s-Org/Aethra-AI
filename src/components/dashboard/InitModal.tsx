@@ -30,18 +30,8 @@ export const InitModal: React.FC<InitModalProps> = ({ isOpen, onClose }) => {
     e.preventDefault();
     setIsActivating(true);
 
-    // Call mock API for POST /api/agent/init
-    try {
-      await fetch('/api/agent/init', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
-      });
-    } catch (e) {
-      console.warn("Mock API call failed, proceeding with local simulation");
-    }
-
-    // Step-by-step activating states
+    // Step-by-step activating states (initializeAgent performs the real
+    // POST /api/agent/init against the backend engine)
     const steps = [
       "Compiling heuristic model weights...",
       "Injecting tone guidelines and editorial criteria...",
