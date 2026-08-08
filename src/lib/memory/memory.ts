@@ -22,10 +22,12 @@ import {
   type MemoryKind,
   type PostLinkRelation
 } from '../db';
+import type { Persona } from '../persona';
 import {
   detectDuplicate,
   evidenceRelation,
   hasMeaningfulNewInfo,
+  KEYWORD_OVERLAP_THRESHOLD,
   memorySubject,
   type DuplicateResult,
   type EvidenceRelation,
@@ -33,6 +35,8 @@ import {
 } from './dedup';
 import {
   createSimilarityProvider,
+  jaccard,
+  tokenize,
   type SimilarityProvider
 } from './similarity';
 
@@ -56,6 +60,9 @@ export interface RelevantMemory {
   relation: EvidenceRelation;
   /** Follow-up carries meaningful new information (ids / new tokens). */
   meaningful: boolean;
+  /** 0..1 how strongly the candidate matches the persona's recurring themes
+   *  (persona-driven retrieval; 0 when no persona is supplied). */
+  personaAffinity: number;
 }
 
 /** Gather the durable memory set for a scope (posts/decisions + memory entries). */
@@ -97,15 +104,51 @@ export function gatherMemoryItems(
   return items;
 }
 
+function personaThemeTokens(persona: Persona): Set<string> {
+  return tokenize([...persona.recurringThemes, ...persona.expertise].join(' '));
+}
+
+/** 0..1 affinity between a candidate and the persona's recurring themes. */
+export function personaAffinityOf(persona: Persona, candidate: MemorySource): number {
+  return jaccard(tokenize(`${candidate.title} ${candidate.summary ?? ''}`), personaThemeTokens(persona));
+}
+
+/** Best level-3 story match, tie-broken by persona theme overlap so the
+ *  persona's recurring themes shape which memory is retrieved. */
+function bestFollowUpMatch(
+  candidate: MemorySource,
+  items: MemoryItem[],
+  persona: Persona | undefined
+): { item: MemoryItem; similarity: number } | null {
+  const candidateTitleTokens = tokenize(candidate.title);
+  const themes = persona ? personaThemeTokens(persona) : null;
+  let best: { item: MemoryItem; similarity: number; themeOverlap: number } | null = null;
+  for (const item of items) {
+    const similarity = jaccard(candidateTitleTokens, tokenize(item.title));
+    if (similarity < KEYWORD_OVERLAP_THRESHOLD) continue;
+    const themeOverlap = themes ? jaccard(tokenize(item.title), themes) : 0;
+    if (
+      !best ||
+      similarity > best.similarity ||
+      (similarity === best.similarity && themeOverlap > best.themeOverlap)
+    ) {
+      best = { item, similarity, themeOverlap };
+    }
+  }
+  return best ? { item: best.item, similarity: best.similarity } : null;
+}
+
 /**
  * Retrieve the memory relevant to a candidate: run the duplicate ladder over
  * the durable memory set and classify the outcome (duplicate vs follow-up
  * story), computing the evidence relation and meaningful-new-info verdict.
+ * A supplied persona shapes retrieval (theme tie-break) and reports how
+ * on-theme the candidate is.
  */
 export function getRelevantMemory(
   agentId: string | null,
   candidate: MemorySource,
-  opts: { provider?: SimilarityProvider; items?: MemoryItem[] } = {}
+  opts: { provider?: SimilarityProvider; items?: MemoryItem[]; persona?: Persona } = {}
 ): RelevantMemory {
   const provider = opts.provider ?? createSimilarityProvider();
   const items = opts.items ?? gatherMemoryItems(agentId);
@@ -115,13 +158,20 @@ export function getRelevantMemory(
     provider
   );
   let followUp: { item: MemoryItem; similarity: number } | null = null;
-  if (duplicate.level === 3 && duplicate.match) {
-    followUp = { item: duplicate.match, similarity: duplicate.similarity };
+  if (duplicate.level === 3) {
+    followUp = bestFollowUpMatch(candidate, items, opts.persona);
   }
   const target = followUp ? followUp.item : duplicate.match;
   const relation = target ? evidenceRelation(candidate, target) : 'confirms';
   const meaningful = target ? hasMeaningfulNewInfo(candidate, target) : true;
-  return { items, duplicate, followUp, relation, meaningful };
+  return {
+    items,
+    duplicate,
+    followUp,
+    relation,
+    meaningful,
+    personaAffinity: opts.persona ? personaAffinityOf(opts.persona, candidate) : 0
+  };
 }
 
 /**
@@ -133,7 +183,7 @@ export function getRelevantMemory(
 export function recordMemoryForAccepted(
   agentId: string | null,
   source: MemorySource,
-  opts: { nowMs: number; followUp?: { subject: string; relation: EvidenceRelation } }
+  opts: { nowMs: number; followUp?: { subject: string; relation: EvidenceRelation }; persona?: Persona }
 ): void {
   const { nowMs } = opts;
   // Story subject: for a follow-up, keep the STORY's subject so the recurring
@@ -141,6 +191,12 @@ export function recordMemoryForAccepted(
   const storySubject = opts.followUp ? memorySubject(opts.followUp.subject) : memorySubject(source.title);
   const relation = opts.followUp?.relation ?? 'confirms';
   const identifiers = identifiersFrom(source);
+  // Persona-driven tagging: which recurring themes does this content touch?
+  const themes = opts.persona
+    ? opts.persona.recurringThemes.filter(theme =>
+        `${source.title} ${source.summary ?? ''}`.toLowerCase().includes(theme.toLowerCase())
+      )
+    : [];
 
   upsertMemoryEntry({
     agentId,
@@ -148,7 +204,7 @@ export function recordMemoryForAccepted(
     subject: storySubject,
     content: source.title,
     importance: 2,
-    metadata: { sourceType: source.sourceType },
+    metadata: { sourceType: source.sourceType, themes },
     nowMs
   });
 
@@ -162,7 +218,8 @@ export function recordMemoryForAccepted(
       canonicalUrl: source.canonicalUrl,
       relation,
       sourceType: source.sourceType,
-      identifiers
+      identifiers,
+      themes
     },
     nowMs
   });
