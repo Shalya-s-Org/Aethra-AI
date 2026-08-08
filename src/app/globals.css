@@ -115,3 +115,21 @@ body {
   background: rgba(0, 240, 255, 0.3);
   color: #ffffff;
 }
+
+/* Visible focus indicator for keyboard users (replaces the default outline) */
+:focus-visible {
+  outline: 2px solid var(--color-cyber-cyan);
+  outline-offset: 2px;
+}
+
+/* Respect users who prefer reduced motion: collapse animations and transitions */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

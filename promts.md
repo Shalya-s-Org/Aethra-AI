@@ -2361,3 +2361,9 @@ Apply the VULN-001 fix: create the agent registry with Object.create(null) (or a
 
 ## Prompt 14
 Apply the VULN-002 fix: stop getOrCreateAgentState from fabricating agents (404 unknown ids), add a body-size cap on POST /init, and add an eviction path that stops scheduler loops on reset.
+
+## Promt 15
+/ui-ux-pro-max
+
+## Prompt 16
+Fix the HIGH UX gaps

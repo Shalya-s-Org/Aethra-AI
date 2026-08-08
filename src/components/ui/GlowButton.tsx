@@ -24,7 +24,7 @@ export const GlowButton: React.FC<GlowButtonProps> = ({
   return (
     <button
       className={cn(
-        "relative px-4 py-2 border rounded font-display tracking-wider text-xs uppercase font-medium transition-all duration-300 active:scale-95 cursor-pointer flex items-center justify-center gap-2",
+        "relative px-4 py-2 border rounded font-display tracking-wider text-xs uppercase font-medium transition-all duration-300 active:scale-95 cursor-pointer flex items-center justify-center gap-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyber-cyan/70 focus-visible:ring-offset-2 focus-visible:ring-offset-cyber-bg",
         variantClasses[variant],
         className
       )}
