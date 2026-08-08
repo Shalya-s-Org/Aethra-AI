@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import type { Topic, Post, MemoryNode } from '../data/mockTopics';
 import type { BackendAgentInstance } from '../utils/agentEngine';
 
@@ -126,6 +126,61 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [autonomousTimelineLogs, setAutonomousTimelineLogs] = useState<Array<{ timestamp: string; message: string }>>([]);
   const [novaLiveFocus, setNovaLiveFocus] = useState(DEFAULT_FOCUS);
 
+  const initializeAgent = async (newConfig: AgentConfig) => {
+    const previousId = agentId;
+    try {
+      const res = await fetch('/api/agent/init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona: { ...newConfig } })
+      });
+      if (!res.ok) throw new Error("Backend initialization failed");
+      const data = await res.json();
+
+      setAgentId(data.agentId);
+      setConfig(newConfig);
+      setIsInitialized(true);
+      setStatus('idle');
+      setCurrentActionDetails("Agent initialized. Backend autonomous cycles online.");
+
+      // Evict any previous session's agent so its scheduler loop stops too.
+      if (previousId) {
+        fetch(`/api/agent?agentId=${encodeURIComponent(previousId)}`, { method: 'DELETE' }).catch(() => {});
+      }
+    } catch (err) {
+      console.error("Could not register agent session on server:", err);
+    }
+  };
+
+  const resetAgent = useCallback(() => {
+    const currentId = agentId;
+    setIsInitialized(false);
+    setAgentId("");
+    setStatus('inactive');
+    setCurrentActionDetails("Agent offline. Initialize agent parameters to activate.");
+    setCountdown(15);
+    setSecondsSinceLastScan(0);
+    setMissionProgress(0);
+    setCurrentTaskName("Observing ecosystem");
+    setNextPublishSeconds(900);
+    setPipelineStats(EMPTY_PIPELINE_STATS);
+    setDiscoveredTopics([]);
+    setPosts([]);
+    setMemoryNodes([]);
+    setDecisions([]);
+    setRejectedTodayList([]);
+    setActiveTopic(null);
+    setPipelineProgress(0);
+    setLastDecisionTimeSeconds(0);
+    setAutonomousTimelineLogs([]);
+    setNovaLiveFocus(DEFAULT_FOCUS);
+
+    // Evict the server-side agent so its scheduler loop stops, not just the view.
+    if (currentId) {
+      fetch(`/api/agent?agentId=${encodeURIComponent(currentId)}`, { method: 'DELETE' }).catch(() => {});
+    }
+  }, [agentId]);
+
   // Mirror the live backend engine state. The server-side engine owns the whole
   // simulation (scanning -> filtering -> reasoning -> ... -> publishing), so the
   // client stays a thin view. The `cancelled` flag drops in-flight responses from
@@ -138,7 +193,15 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const syncAgentState = async () => {
       try {
         const res = await fetch(`/api/agent/state?agentId=${encodeURIComponent(agentId)}`);
-        if (!res.ok || cancelled) return;
+        if (cancelled) return;
+        if (res.status === 404) {
+          // The agent no longer exists server-side (evicted or the server lost
+          // its in-memory registry). Drop the session instead of freezing on a
+          // stale snapshot.
+          resetAgent();
+          return;
+        }
+        if (!res.ok) return;
         const data = (await res.json()) as BackendAgentInstance;
         if (cancelled) return;
 
@@ -173,7 +236,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       cancelled = true;
       clearInterval(interval);
     };
-  }, [isInitialized, agentId]);
+  }, [isInitialized, agentId, resetAgent]);
 
   const nextPublishCountdown = useMemo(() => {
     const hours = Math.floor(nextPublishSeconds / 3600);
@@ -181,49 +244,6 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const secs = nextPublishSeconds % 60;
     return `${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m ${String(secs).padStart(2, '0')}s`;
   }, [nextPublishSeconds]);
-
-  const initializeAgent = async (newConfig: AgentConfig) => {
-    try {
-      const res = await fetch('/api/agent/init', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ persona: { ...newConfig } })
-      });
-      if (!res.ok) throw new Error("Backend initialization failed");
-      const data = await res.json();
-
-      setAgentId(data.agentId);
-      setConfig(newConfig);
-      setIsInitialized(true);
-      setStatus('idle');
-      setCurrentActionDetails("Agent initialized. Backend autonomous cycles online.");
-    } catch (err) {
-      console.error("Could not register agent session on server:", err);
-    }
-  };
-
-  const resetAgent = () => {
-    setIsInitialized(false);
-    setAgentId("");
-    setStatus('inactive');
-    setCurrentActionDetails("Agent offline. Initialize agent parameters to activate.");
-    setCountdown(15);
-    setSecondsSinceLastScan(0);
-    setMissionProgress(0);
-    setCurrentTaskName("Observing ecosystem");
-    setNextPublishSeconds(900);
-    setPipelineStats(EMPTY_PIPELINE_STATS);
-    setDiscoveredTopics([]);
-    setPosts([]);
-    setMemoryNodes([]);
-    setDecisions([]);
-    setRejectedTodayList([]);
-    setActiveTopic(null);
-    setPipelineProgress(0);
-    setLastDecisionTimeSeconds(0);
-    setAutonomousTimelineLogs([]);
-    setNovaLiveFocus(DEFAULT_FOCUS);
-  };
 
   return (
     <AgentContext.Provider value={{

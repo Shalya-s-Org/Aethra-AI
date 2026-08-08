@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getOrCreateAgentState, isSafeAgentId } from '../../../../utils/agentEngine';
+import { getAgentState, isSafeAgentId } from '../../../../utils/agentEngine';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -12,8 +12,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Invalid agentId." }, { status: 400 });
   }
 
-  // Retrieve isolated agent state instance
-  const agent = getOrCreateAgentState(agentId);
+  // Retrieve isolated agent state instance; unknown ids are absent, not fabricated
+  const agent = getAgentState(agentId);
+  if (!agent) {
+    return NextResponse.json({ error: "Agent not found." }, { status: 404 });
+  }
 
   return NextResponse.json(agent);
 }
