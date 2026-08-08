@@ -56,6 +56,8 @@ export interface FeedPost {
   rationale: string;
   topicId: string | null;
   sources: string[];
+  /** True for demo/seed posts (excluded from the judged API feed). */
+  isDemo: boolean;
 }
 
 export interface DecisionRow {
@@ -218,6 +220,24 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_runs_agent_started ON agent_runs (agent_id, started_at DESC);
       CREATE INDEX IF NOT EXISTS idx_runs_agent_status ON agent_runs (agent_id, status);
     `
+  },
+  {
+    id: '002_demo_posts_and_idempotency',
+    sql: `
+      -- Demo/seed posts are marked and excluded from the judged feed.
+      ALTER TABLE posts ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0;
+
+      -- Idempotency support for POST /api/agent/init: one row per
+      -- Idempotency-Key header, holding the stored response for replay.
+      CREATE TABLE init_requests (
+        idempotency_key TEXT PRIMARY KEY,
+        agent_id        TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+        response_json   TEXT NOT NULL,
+        status          INTEGER NOT NULL,
+        created_at      TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_init_requests_agent ON init_requests (agent_id);
+    `
   }
 ];
 
@@ -272,6 +292,22 @@ export function closeDb(): void {
   if (db) {
     db.close();
     db = null;
+  }
+}
+
+/** Run `fn` inside a SQLite transaction (BEGIN/COMMIT/ROLLBACK). Because
+ *  DatabaseSync is synchronous, the transaction is atomic against the event
+ *  loop: concurrent route handlers cannot observe a partial state. */
+export function withTransaction<T>(fn: () => T): T {
+  const d = getDb();
+  d.exec('BEGIN');
+  try {
+    const result = fn();
+    d.exec('COMMIT');
+    return result;
+  } catch (err) {
+    d.exec('ROLLBACK');
+    throw err;
   }
 }
 
@@ -486,17 +522,20 @@ export interface PostInput {
   noveltyScore: number | null;
   publicationId: string | null;
   publishedAtMs: number;
+  /** Mark demo/seed posts. Demo posts are excluded from the judged feed and
+   *  never count toward duplicate prevention. */
+  isDemo?: boolean;
 }
 
-/** Insert a published post. Throws if (agent_id, topic_id) already has a post
- *  — the DB-level duplicate-publication backstop. */
+/** Insert a published post. Throws if (agent_id, topic_id) already has a real
+ *  (non-demo) post — the DB-level duplicate-publication backstop. */
 export function insertPost(input: PostInput): void {
   getDb()
     .prepare(
       `INSERT INTO posts (id, agent_id, topic_id, title, body, opinion, rationale,
                           confidence_score, category, importance_score, novelty_score,
-                          publication_id, published_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                          publication_id, published_at, is_demo)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       input.id,
@@ -511,16 +550,22 @@ export function insertPost(input: PostInput): void {
       input.importanceScore,
       input.noveltyScore,
       input.publicationId,
-      iso(input.publishedAtMs)
+      iso(input.publishedAtMs),
+      input.isDemo ? 1 : 0
     );
 }
 
-/** Feed ordering: newest first (uses idx_posts_agent_published). */
-export function getPostsByAgent(agentId: string): FeedPost[] {
+/** Feed ordering: newest first (uses idx_posts_agent_published). Demo/seed
+ *  posts are excluded by default (the judged API feed). */
+export function getPostsByAgent(
+  agentId: string,
+  options: { includeDemo?: boolean } = {}
+): FeedPost[] {
   const rows = getDb()
     .prepare(
-      `SELECT id, published_at, title, body, opinion, rationale, topic_id
-       FROM posts WHERE agent_id = ? ORDER BY published_at DESC, id DESC`
+      `SELECT id, published_at, title, body, opinion, rationale, topic_id, is_demo
+       FROM posts WHERE agent_id = ? ${options.includeDemo ? '' : 'AND is_demo = 0'}
+       ORDER BY published_at DESC, id DESC`
     )
     .all(agentId);
   return rows.map(r => {
@@ -533,27 +578,30 @@ export function getPostsByAgent(agentId: string): FeedPost[] {
       opinion: r.opinion == null ? '' : String(r.opinion),
       rationale: r.rationale == null ? '' : String(r.rationale),
       topicId,
-      sources: getSourceUrlsForTopic(agentId, topicId ?? '')
+      sources: getSourceUrlsForTopic(agentId, topicId ?? ''),
+      isDemo: Number(r.is_demo) === 1
     };
   });
 }
 
+/** Count real (non-demo) posts — the judged feed size. */
 export function countPosts(agentId: string): number {
   const row = getDb()
-    .prepare('SELECT COUNT(*) AS n FROM posts WHERE agent_id = ?')
+    .prepare('SELECT COUNT(*) AS n FROM posts WHERE agent_id = ? AND is_demo = 0')
     .get(agentId);
   return Number((row as { n: number }).n);
 }
 
 export function hasPublishedTopic(agentId: string, topicId: string): boolean {
   const row = getDb()
-    .prepare('SELECT 1 FROM posts WHERE agent_id = ? AND topic_id = ? LIMIT 1')
+    .prepare('SELECT 1 FROM posts WHERE agent_id = ? AND topic_id = ? AND is_demo = 0 LIMIT 1')
     .get(agentId, topicId);
   return row != null;
 }
 
-/** True if this agent already published any post whose topic carries one of
- *  the given canonical source URLs (cross-topic duplicate prevention). */
+/** True if this agent already published a REAL post whose topic carries one of
+ *  the given canonical source URLs (cross-topic duplicate prevention). Demo
+ *  posts are ignored. */
 export function findPublishedByCanonicalSource(agentId: string, canonicalUrls: string[]): boolean {
   const urls = canonicalUrls.filter(Boolean);
   if (urls.length === 0) return false;
@@ -562,7 +610,7 @@ export function findPublishedByCanonicalSource(agentId: string, canonicalUrls: s
     .prepare(
       `SELECT 1 FROM posts p
        JOIN topics t ON t.id = p.topic_id
-       WHERE p.agent_id = ? AND t.canonical_source_url IN (${placeholders})
+       WHERE p.agent_id = ? AND p.is_demo = 0 AND t.canonical_source_url IN (${placeholders})
        LIMIT 1`
     )
     .get(agentId, ...urls);
@@ -765,4 +813,52 @@ export function getRunsByAgent(agentId: string): RunRow[] {
     error: r.error == null ? null : String(r.error),
     createdAt: String(r.created_at)
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Init idempotency (POST /api/agent/init + Idempotency-Key)
+// ---------------------------------------------------------------------------
+
+export interface InitResponseRecord {
+  agentId: string;
+  responseJson: string;
+  status: number;
+}
+
+/** Look up a stored idempotent response for a key. Rows claimed but not yet
+ *  completed carry an empty response_json and are treated as stale. */
+export function getInitResponse(idempotencyKey: string): InitResponseRecord | null {
+  const row = getDb()
+    .prepare('SELECT agent_id, response_json, status FROM init_requests WHERE idempotency_key = ?')
+    .get(idempotencyKey);
+  if (!row) return null;
+  return {
+    agentId: String(row.agent_id),
+    responseJson: String(row.response_json),
+    status: Number(row.status)
+  };
+}
+
+/** Atomically claim a key. Returns true if THIS caller won the claim.
+ *  Concurrency-safe: a second caller with the same key gets false and must
+ *  replay the winner's stored response. */
+export function claimInitKey(idempotencyKey: string): boolean {
+  const result = getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO init_requests (idempotency_key, agent_id, response_json, status, created_at)
+       VALUES (?, '', '', 0, ?)`
+    )
+    .run(idempotencyKey, new Date().toISOString());
+  return result.changes > 0;
+}
+
+export function storeInitResponse(idempotencyKey: string, agentId: string, responseJson: string, status: number): void {
+  getDb()
+    .prepare('UPDATE init_requests SET agent_id = ?, response_json = ?, status = ? WHERE idempotency_key = ?')
+    .run(agentId, responseJson, status, idempotencyKey);
+}
+
+/** Release a stale/aborted claim so the key can be retried. */
+export function releaseInitKey(idempotencyKey: string): void {
+  getDb().prepare('DELETE FROM init_requests WHERE idempotency_key = ?').run(idempotencyKey);
 }

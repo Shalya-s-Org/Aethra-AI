@@ -30,6 +30,9 @@ export interface Post {
   noveltyScore: number;
   relatedPosts: string[];
   publicationId: string;
+  /** True for static demo/seed posts. Demo posts are excluded from the judged
+   *  GET /api/agent/feed API and never count toward duplicate prevention. */
+  demoOnly?: boolean;
 }
 
 export interface MemoryNode {

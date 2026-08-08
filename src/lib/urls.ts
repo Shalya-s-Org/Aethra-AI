@@ -36,5 +36,9 @@ export function canonicalizeSourceUrl(input: string): string | null {
     url.pathname = url.pathname.slice(0, -1);
   }
 
-  return url.toString();
+  let result = url.toString();
+  // URL#toString re-adds a root slash for bare hosts; strip it for a clean
+  // canonical form.
+  if (result.endsWith('/')) result = result.slice(0, -1);
+  return result;
 }

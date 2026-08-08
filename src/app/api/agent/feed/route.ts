@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { isSafeAgentId, peekAgentState } from '../../../../lib/agentEngine';
+import { getPostsByAgent } from '../../../../lib/db';
 
 // Always serve live feed data — never cached.
 export const dynamic = 'force-dynamic';
@@ -15,24 +16,22 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Invalid agentId." }, { status: 400 });
   }
 
-  // READ-ONLY projection. This route never advances the pipeline, never writes
-  // to the store, and never generates content: it only returns posts that the
-  // engine already materialized (the pipeline is driven by state reads and the
-  // scheduler, never by this route). Unknown ids are absent, never fabricated.
-  const agent = peekAgentState(agentId);
-  if (!agent) {
+  // READ-ONLY projection of the durable posts table: this route never advances
+  // the pipeline, never writes, and never generates content. Unknown ids are
+  // absent, never fabricated.
+  if (!peekAgentState(agentId)) {
     return NextResponse.json({ error: "Agent not found." }, { status: 404 });
   }
 
-  // Return formatted posts (reverse chronological: newest first)
-  const sortedPosts = [...agent.posts].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  );
+  // Reverse chronological (newest first) via idx_posts_agent_published.
+  const posts = getPostsByAgent(agentId);
 
-  const formattedPosts = sortedPosts.map(p => ({
+  // Comply with the API contract: id, createdAt (ISO UTC), text, rationale,
+  // sources (canonical HTTPS URLs).
+  const formattedPosts = posts.map(p => ({
     id: p.id,
     createdAt: p.createdAt,
-    text: `${p.title}\n\n${p.text}\n\nAssessment: ${p.opinion}`,
+    text: `${p.title}\n\n${p.body}\n\nAssessment: ${p.opinion}`,
     rationale: p.rationale,
     sources: p.sources
   }));
