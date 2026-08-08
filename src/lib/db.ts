@@ -366,6 +366,20 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE posts ADD COLUMN title_hash TEXT;
       CREATE INDEX idx_posts_title_hash ON posts (title_hash);
     `
+  },
+  {
+    id: '007_llm_generation',
+    // Server-side LLM post generation. Every accepted editorial decision may
+    // carry generated output; the status records whether generation succeeded
+    // (schema-validated JSON persisted) or failed (the decision was flipped to
+    // rejected rather than publishing weak content).
+    sql: `
+      ALTER TABLE discovery_decisions ADD COLUMN generated_json TEXT;
+      ALTER TABLE discovery_decisions ADD COLUMN generation_status TEXT NOT NULL DEFAULT 'none';
+      ALTER TABLE discovery_decisions ADD COLUMN generation_failure TEXT;
+      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_generation
+        ON discovery_decisions (generation_status);
+    `
   }
 ];
 
@@ -1149,6 +1163,9 @@ export interface DiscoveryDecisionRow {
   evidenceConfidence: number;
   explanation: string;
   decidedAt: string; // ISO UTC
+  generationStatus: 'none' | 'generated' | 'failed';
+  generatedJson: string | null;
+  generationFailure: string | null;
 }
 
 export interface DiscoveryDecisionInput {
@@ -1167,6 +1184,12 @@ export interface DiscoveryDecisionInput {
   };
   explanation: string;
   decidedAtMs: number;
+  /** LLM generation outcome (schema-validated JSON, or the failure). */
+  generation?: {
+    status: 'none' | 'generated' | 'failed';
+    json?: string | null;
+    failure?: string | null;
+  };
 }
 
 /** Upsert one decision per candidate (re-evaluation updates in place). */
@@ -1176,8 +1199,8 @@ export function upsertDiscoveryDecision(input: DiscoveryDecisionInput): void {
       `INSERT INTO discovery_decisions
          (id, candidate_id, decision, total_score, persona_relevance, technical_impact,
           source_quality, recency, novelty, discussion_value, evidence_confidence,
-          explanation, decided_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          explanation, decided_at, generated_json, generation_status, generation_failure)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(candidate_id) DO UPDATE SET
          decision = excluded.decision,
          total_score = excluded.total_score,
@@ -1189,7 +1212,10 @@ export function upsertDiscoveryDecision(input: DiscoveryDecisionInput): void {
          discussion_value = excluded.discussion_value,
          evidence_confidence = excluded.evidence_confidence,
          explanation = excluded.explanation,
-         decided_at = excluded.decided_at`
+         decided_at = excluded.decided_at,
+         generated_json = excluded.generated_json,
+         generation_status = excluded.generation_status,
+         generation_failure = excluded.generation_failure`
     )
     .run(
       input.id,
@@ -1204,7 +1230,10 @@ export function upsertDiscoveryDecision(input: DiscoveryDecisionInput): void {
       input.components.discussionValue,
       input.components.evidenceConfidence,
       input.explanation,
-      iso(input.decidedAtMs)
+      iso(input.decidedAtMs),
+      input.generation?.json ?? null,
+      input.generation?.status ?? 'none',
+      input.generation?.failure ?? null
     );
 }
 
@@ -1307,7 +1336,7 @@ export function getDiscoveryDecisions(options: { limit?: number; decision?: Edit
   let sql =
     `SELECT id, candidate_id, decision, total_score, persona_relevance, technical_impact,
             source_quality, recency, novelty, discussion_value, evidence_confidence,
-            explanation, decided_at
+            explanation, decided_at, generated_json, generation_status, generation_failure
      FROM discovery_decisions`;
   const args: Array<string | number> = [];
   if (options.decision) {
@@ -1332,7 +1361,10 @@ export function getDiscoveryDecisions(options: { limit?: number; decision?: Edit
       discussionValue: Number(r.discussion_value),
       evidenceConfidence: Number(r.evidence_confidence),
       explanation: String(r.explanation),
-      decidedAt: String(r.decided_at)
+      decidedAt: String(r.decided_at),
+      generationStatus: String(r.generation_status) as 'none' | 'generated' | 'failed',
+      generatedJson: r.generated_json == null ? null : String(r.generated_json),
+      generationFailure: r.generation_failure == null ? null : String(r.generation_failure)
     }));
 }
 

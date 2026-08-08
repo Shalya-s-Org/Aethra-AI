@@ -41,6 +41,7 @@ export function allowedNumbersOf(ctx: Pick<GenerationContext, 'candidate'>): Set
     ctx.candidate.title,
     ctx.candidate.summary ?? '',
     ctx.candidate.canonicalUrl,
+    ctx.candidate.sourceName,
     ctx.candidate.rawEvidence
   ].join(' ');
   return new Set(numberTokensOf(corpus));

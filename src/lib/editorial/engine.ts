@@ -10,6 +10,7 @@
 // every tie-break are total orders (score desc → publishedAt asc → URL asc).
 
 import { ulid } from '../ids';
+import { generatePost, createLlmProvider, type LlmProvider } from '../llm';
 import {
   countAcceptedSinceMs,
   getAcceptedDecisionCandidates,
@@ -54,6 +55,9 @@ export interface EditorialRunOptions {
   routineIntervalMs?: number;
   /** Max routine posts per rolling 24h (override-exempt). */
   dailyCap?: number;
+  /** LLM provider for accepted-post generation. Defaults to the env-driven
+   *  factory (deterministic local provider unless AETHRA_LLM_PROVIDER is set). */
+  provider?: LlmProvider;
 }
 
 export interface EditorialRunSummary {
@@ -307,13 +311,50 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
   }
 
   // Persist every decision (accepted, held, rejected) with scores + explanation.
+  // Accepted entries first generate a schema-validated post via the LLM
+  // provider; a generation/validation failure flips the decision to rejected
+  // (never publishes weak content) and records the failure. Durable memory is
+  // only recorded when generation actually succeeded.
+  const provider = options.provider ?? createLlmProvider();
   const decisions: EditorialDecision[] = [];
   for (const entry of entries) {
-    const explanation = buildExplanation(entry.kind, entry.scored, entry.reasons);
+    let kind = entry.kind;
+    let reasons = entry.reasons;
+    let generation:
+      | { status: 'generated'; json: string }
+      | { status: 'failed'; failure: string }
+      | undefined;
+
+    if (kind === 'accepted') {
+      const outcome = await generatePost({
+        persona,
+        candidate: entry.scored.candidate,
+        followUp: entry.scored.flags.meaningfulFollowUp,
+        themes: themeHitsOf(persona, textOf(entry.scored.candidate)),
+        competing: entries.map(e => ({
+          title: e.scored.candidate.title,
+          score: e.scored.total,
+          kind: e.kind
+        })),
+        provider
+      });
+      if (outcome.ok) {
+        generation = { status: 'generated', json: outcome.raw };
+      } else {
+        kind = 'rejected';
+        reasons = [
+          ...reasons,
+          `Generation failed (${outcome.error}). Recorded as rejected rather than publishing weak content.`
+        ];
+        generation = { status: 'failed', failure: outcome.error };
+      }
+    }
+
+    const explanation = buildExplanation(kind, entry.scored, reasons);
     const decision: EditorialDecision = {
       id: ulid(now),
       candidateId: entry.scored.candidate.id,
-      kind: entry.kind,
+      kind,
       totalScore: entry.scored.total,
       components: entry.scored.components,
       explanation,
@@ -322,17 +363,18 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
     upsertDiscoveryDecision({
       id: decision.id,
       candidateId: decision.candidateId,
-      decision: decision.kind,
+      decision: kind,
       totalScore: decision.totalScore,
       components: decision.components,
       explanation,
-      decidedAtMs: now
+      decidedAtMs: now,
+      generation
     });
 
-    // Durable memory: accepted content becomes long-term + editorial memory
-    // (persona scope), keyed to the story subject for follow-up accumulation,
-    // and tagged with the persona's recurring themes it touches.
-    if (entry.kind === 'accepted') {
+    // Durable memory: successfully generated content becomes long-term +
+    // editorial memory (persona scope), keyed to the story subject for
+    // follow-up accumulation, and tagged with the persona's recurring themes.
+    if (kind === 'accepted') {
       recordMemoryForAccepted(null, entry.scored.candidate, {
         nowMs: now,
         followUp: entry.scored.flags.meaningfulFollowUp
