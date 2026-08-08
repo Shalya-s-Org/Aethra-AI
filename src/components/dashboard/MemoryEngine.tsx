@@ -130,23 +130,16 @@ export const MemoryEngine: React.FC = () => {
 
       {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Interactive SVG Graph */}
-        <div className="lg:col-span-2 flex flex-col h-[400px]">
-          <div className="flex gap-2 mb-3 overflow-x-auto pb-1">
-            {groups.map(g => (
-              <button
-                key={g.id}
-                onClick={() => setSelectedGroup(g.id)}
-                className={cn(
-                  "px-3 py-1 text-[10px] font-display uppercase tracking-wider border rounded cursor-pointer transition-colors whitespace-nowrap",
-                  selectedGroup === g.id
-                    ? "bg-cyber-cyan/15 text-cyber-cyan border-cyber-cyan/35 shadow-[0_0_10px_rgba(0,240,255,0.05)]"
-                    : "bg-black/40 text-gray-400 border-white/5 hover:text-white"
-                )}
-              >
-                {g.label}
-              </button>
-            ))}
+        {/* Visual Graph Chain */}
+        <GlassCard className="lg:col-span-2 p-5 bg-black/60 border-white/5 flex flex-col h-[480px]" glowColor="cyan">
+          <div className="mb-4">
+            <h4 className="font-display text-xs font-bold tracking-wider text-white uppercase flex items-center gap-2">
+              <Sparkles className="w-3.5 h-3.5 text-cyber-cyan animate-pulse" />
+              Active Knowledge Chain: OpenAI &rarr; Inference
+            </h4>
+            <p className="text-[9px] text-gray-500 uppercase tracking-widest font-mono mt-0.5">
+              Logic-connected timeline vectors representing Dr. Nova&apos;s core research index
+            </p>
           </div>
 
           <div className="flex-1 rounded border border-white/5 bg-black/40 overflow-hidden relative">

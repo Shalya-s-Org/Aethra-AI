@@ -18,16 +18,12 @@ export const AnalyticsView: React.FC = () => {
       counts[d.category] = (counts[d.category] || 0) + 1;
     });
 
-    if (Object.keys(counts).length === 0) {
-      // Seed fallback values only if no decisions have run yet
-      counts['Agentic AI'] = 3;
-      counts['Infrastructure'] = 2;
-      counts['RAG & Data'] = 1;
-    }
-
+    // Make sure we have at least some values to display nice charts.
+    // Deterministic filler (seeded by category name) — Math.random() here made
+    // the chart bars change on every render (impure render).
     return Object.entries(counts).map(([name, count]) => ({
       name,
-      count
+      count: count || ([...name].reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 5) + 1
     }));
   }, [decisions]);
 

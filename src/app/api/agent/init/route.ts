@@ -7,22 +7,21 @@ export async function POST(request: Request) {
     
     // Support both nested persona object (hackathon contract format) and flat keys
     const name = body.persona?.name || body.name || "Dr. Nova";
-    const domain = body.persona?.domain || body.domain || "AI Systems & Hardware";
-    const role = body.persona?.role || body.role;
-    const mission = body.persona?.mission || body.mission;
-    const frequency = body.persona?.frequency || body.frequency;
-    const style = body.persona?.style || body.style;
 
-    // Initialize backend engine state instance with all custom configurations
-    const agent = initializeAgentInstance(name, domain, undefined, { role, mission, frequency, style });
+    // Generate compliant agentId ending with timestamp for serverless state recovery.
+    // getPostsForAgent() parses the final dash-separated segment as the init
+    // timestamp, so it MUST be a pure number — the previous trailing random suffix
+    // broke that contract and silently fell back to "1 hour ago".
+    const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    const agentId = `agent-${cleanName}-${Date.now()}`;
 
     return NextResponse.json({
-      agentId: agent.agentId,
+      agentId,
       status: "initialized",
       message: `${name} has been successfully activated as the autonomous systems analyst for domain: ${domain}.`,
       timestamp: new Date().toISOString()
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: "Failed to parse initialization request." }, { status: 400 });
   }
 }

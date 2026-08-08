@@ -103,8 +103,16 @@ export const progressivePosts: ServerPost[] = [
   }
 ];
 
-export function getPostsForAgent(agentId: string): any[] {
-  // Extract timestamp from agentId. Supports suffixes and format variations
+export interface ProgressiveFeedPost {
+  id: string;
+  createdAt: string;
+  text: string;
+  rationale: string;
+  sources: string[];
+}
+
+export function getPostsForAgent(agentId: string): ProgressiveFeedPost[] {
+  // Extract timestamp from agentId. Example agentId format: "agent-dr-nova-1723000000000"
   const parts = agentId.split('-');
   let initTime = NaN;
   
