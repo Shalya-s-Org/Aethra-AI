@@ -755,6 +755,10 @@ export function initializeAgentInstance(
   return newAgent;
 }
 
+// Track the scheduler interval handle per agent so eviction can stop the loop
+// immediately instead of waiting for the next tick to self-clean.
+const schedulerLoops = new Map<string, ReturnType<typeof setInterval>>();
+
 // Tick the agent state variables in-memory to simulate real life loops on backend
 function startAgentSchedulerLoop(agentId: string) {
   const interval = setInterval(() => {
@@ -763,6 +767,7 @@ function startAgentSchedulerLoop(agentId: string) {
     
     if (!agent) {
       clearInterval(interval);
+      schedulerLoops.delete(agentId);
       return;
     }
 
@@ -781,6 +786,7 @@ function startAgentSchedulerLoop(agentId: string) {
       }
     }
   }, 1000);
+  schedulerLoops.set(agentId, interval);
 }
 
 // Background simulation trigger: runs scanning -> filtering -> reasoning -> memory -> writing -> publishing -> learning
@@ -1008,13 +1014,20 @@ export function isSafeAgentId(agentId: string): boolean {
   return true;
 }
 
-// Retrieve an agent's details, fall back to initializing a default one if missing
-export function getOrCreateAgentState(agentId: string): BackendAgentInstance {
+// Retrieve an agent's state, or null when it does not exist. No fabrication:
+// the routes decide how to answer an unknown id (404), and only init may create.
+export function getAgentState(agentId: string): BackendAgentInstance | null {
   const registry = getGlobalAgentsRegistry();
-  if (registry[agentId]) {
-    return registry[agentId];
-  }
+  return registry[agentId] || null;
+}
 
-  // Fallback to avoid breaking state for stale IDs
-  return initializeAgentInstance("Dr. Nova", "AI Systems & Hardware", agentId);
+// Evict an agent from the registry and stop its scheduler loop. Any in-flight
+// stage timers no-op because they re-fetch the registry and bail when missing.
+export function destroyAgent(agentId: string): void {
+  const loop = schedulerLoops.get(agentId);
+  if (loop) {
+    clearInterval(loop);
+    schedulerLoops.delete(agentId);
+  }
+  delete getGlobalAgentsRegistry()[agentId];
 }

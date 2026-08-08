@@ -2358,3 +2358,6 @@ now tell me if this is completely ready and as per problem statement or somethin
 
 ## Prompt 13
 Apply the VULN-001 fix: create the agent registry with Object.create(null) (or a Map) so __proto__ keys can't pollute it, and validate agentId in the state/feed routes.
+
+## Prompt 14
+Apply the VULN-002 fix: stop getOrCreateAgentState from fabricating agents (404 unknown ids), add a body-size cap on POST /init, and add an eviction path that stops scheduler loops on reset.
