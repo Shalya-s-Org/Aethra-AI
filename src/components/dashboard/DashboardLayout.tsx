@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAgent } from '../../context/AgentContext';
-import { LayoutDashboard, Radio, Database, Scale, Eye, BarChart3, Settings, AlertCircle, RefreshCw, Power } from 'lucide-react';
+import { LayoutDashboard, Radio, Database, Scale, Eye, BarChart3, Settings, Power } from 'lucide-react';
 import { StatusBadge } from '../ui/StatusBadge';
 import { cn } from '../../utils/cn';
 
@@ -117,7 +117,7 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
             <StatusBadge status={status} />
             {isInitialized && (
               <span className="text-xs text-gray-500 font-mono hidden md:inline">
-                // Pipeline Trigger Cycle Interval: {config.frequency}m
+                {`// Pipeline Trigger Cycle Interval: ${config.frequency}m`}
               </span>
             )}
           </div>

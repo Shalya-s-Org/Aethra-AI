@@ -53,10 +53,13 @@ export const EditorialDecisions: React.FC = () => {
               const isExpanded = expandedId === dec.id;
               const isAccepted = dec.recommendation === 'Accept';
               
-              // Memory match calculations based on acceptance state
+              // Memory match calculations based on acceptance state.
+              // Deterministic per decision id — Math.random() here re-rolled a
+              // different % on every render (impure render, flickering UI).
+              const idSeed = [...dec.id].reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) >>> 0, 0);
               const memoryMatch = isAccepted 
-                ? `${Math.floor(Math.random() * 15) + 5}%` // Low match is good
-                : dec.category === 'Duplicate' ? '94%' : `${Math.floor(Math.random() * 20) + 15}%`;
+                ? `${(idSeed % 15) + 5}%` // Low match is good
+                : dec.category === 'Duplicate' ? '94%' : `${(idSeed % 20) + 15}%`;
 
               return (
                 <div 

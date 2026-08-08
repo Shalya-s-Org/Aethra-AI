@@ -586,7 +586,7 @@ export const DashboardOverview: React.FC = () => {
                 </div>
 
                 <div className="text-[8px] text-gray-400 pl-2 border-l border-cyber-cyan/30 mt-2 font-mono">
-                  // Click card to open full decision replay logic
+                  {"// Click card to open full decision replay logic"}
                 </div>
               </div>
             </GlassCard>
@@ -690,7 +690,7 @@ export const DashboardOverview: React.FC = () => {
             </h4>
             <div className="space-y-1.5 font-mono text-[9px] text-gray-400">
               <div className="flex justify-between">
-                <span>Today's Active Topic:</span>
+                <span>Today&apos;s Active Topic:</span>
                 <span className="text-white truncate max-w-[120px]">DeepSeek-V3 MLA</span>
               </div>
               <div className="flex justify-between">

@@ -1787,3 +1787,11 @@ Only fix the underlying React data and rendering issue.
 
 ## Prompt 6
 I want to deploy it on vercel
+
+
+## Prompt 7
+Improve dynamic structure of my code
+
+
+## Prompt 8
+/review

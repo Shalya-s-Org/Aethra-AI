@@ -95,7 +95,7 @@ export const MemoryEngine: React.FC = () => {
               Active Knowledge Chain: OpenAI &rarr; Inference
             </h4>
             <p className="text-[9px] text-gray-500 uppercase tracking-widest font-mono mt-0.5">
-              Logic-connected timeline vectors representing Dr. Nova's core research index
+              Logic-connected timeline vectors representing Dr. Nova&apos;s core research index
             </p>
           </div>
 

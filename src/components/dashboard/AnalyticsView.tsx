@@ -26,10 +26,12 @@ export const AnalyticsView: React.FC = () => {
       }
     });
 
-    // Make sure we have at least some values to display nice charts
+    // Make sure we have at least some values to display nice charts.
+    // Deterministic filler (seeded by category name) — Math.random() here made
+    // the chart bars change on every render (impure render).
     return Object.entries(counts).map(([name, count]) => ({
       name,
-      count: count || Math.floor(Math.random() * 5) + 1
+      count: count || ([...name].reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 5) + 1
     }));
   }, [decisions]);
 
