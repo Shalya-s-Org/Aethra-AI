@@ -393,6 +393,56 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_discovery_decisions_quality
         ON discovery_decisions (quality_status);
     `
+  },
+  {
+    id: '009_durable_jobs',
+    // Durable autonomous orchestration.
+    //   scheduled_jobs       one recurring job per agent; occurrences are
+    //                        claimed with a DB-backed lease (lease_owner +
+    //                        lease_expires_at), so duplicate deliveries and
+    //                        crashed workers can never process the same
+    //                        occurrence twice. idempotency_key is stamped at
+    //                        claim time and identifies the occurrence across
+    //                        duplicate deliveries. attempts/max_attempts/
+    //                        backoff_ms give bounded exponential backoff for
+    //                        transient failures; exhausting attempts records a
+    //                        terminal failure and the recurring cadence
+    //                        continues.
+    //   posts.idempotency_key  delivery guard: UNIQUE(agent_id, idempotency_key)
+    //                        means a re-delivered occurrence can never publish
+    //                        the same decision twice.
+    //   discovery_decisions.published_post_id  global publication marker; a
+    //                        decision publishes at most once across agents.
+    sql: `
+      CREATE TABLE scheduled_jobs (
+        id               TEXT PRIMARY KEY,
+        agent_id         TEXT NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
+        job_type         TEXT NOT NULL DEFAULT 'agent_cycle',
+        status           TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','terminal')),
+        schedule_ms      INTEGER NOT NULL,
+        next_run_at      INTEGER NOT NULL,
+        lease_owner      TEXT,
+        lease_expires_at INTEGER,
+        attempts         INTEGER NOT NULL DEFAULT 0,
+        max_attempts     INTEGER NOT NULL DEFAULT 5,
+        backoff_ms       INTEGER NOT NULL DEFAULT 1000,
+        idempotency_key  TEXT,
+        last_run_at      INTEGER,
+        last_error       TEXT,
+        created_at       TEXT NOT NULL,
+        updated_at       TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_due ON scheduled_jobs (status, next_run_at);
+      CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_lease ON scheduled_jobs (lease_expires_at);
+
+      ALTER TABLE posts ADD COLUMN idempotency_key TEXT;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_idempotency
+        ON posts (agent_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+
+      ALTER TABLE discovery_decisions ADD COLUMN published_post_id TEXT;
+      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_published
+        ON discovery_decisions (published_post_id);
+    `
   }
 ];
 
@@ -680,6 +730,9 @@ export interface PostInput {
   /** Mark demo/seed posts. Demo posts are excluded from the judged feed and
    *  never count toward duplicate prevention. */
   isDemo?: boolean;
+  /** Delivery guard: UNIQUE(agent_id, idempotency_key). A re-delivered job
+   *  occurrence (same key) can never insert the same post twice. */
+  idempotencyKey?: string;
 }
 
 /** Insert a published post. Throws if (agent_id, topic_id) already has a real
@@ -689,8 +742,8 @@ export function insertPost(input: PostInput): void {
     .prepare(
       `INSERT INTO posts (id, agent_id, topic_id, title, title_hash, body, opinion, rationale,
                           confidence_score, category, importance_score, novelty_score,
-                          publication_id, published_at, is_demo)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                          publication_id, published_at, is_demo, idempotency_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       input.id,
@@ -707,7 +760,8 @@ export function insertPost(input: PostInput): void {
       input.noveltyScore,
       input.publicationId,
       iso(input.publishedAtMs),
-      input.isDemo ? 1 : 0
+      input.isDemo ? 1 : 0,
+      input.idempotencyKey ?? null
     );
 }
 
@@ -1183,6 +1237,7 @@ export interface DiscoveryDecisionRow {
   generationFailure: string | null;
   qualityStatus: 'pending' | 'passed' | 'held' | 'rejected';
   qualityJson: string | null;
+  publishedPostId: string | null;
 }
 
 export interface DiscoveryDecisionInput {
@@ -1364,7 +1419,8 @@ export function getDiscoveryDecisions(options: { limit?: number; decision?: Edit
     `SELECT dd.id, dd.candidate_id, dc.title, dd.decision, dd.total_score, dd.persona_relevance,
             dd.technical_impact, dd.source_quality, dd.recency, dd.novelty, dd.discussion_value,
             dd.evidence_confidence, dd.explanation, dd.decided_at, dd.generated_json,
-            dd.generation_status, dd.generation_failure, dd.quality_json, dd.quality_status
+            dd.generation_status, dd.generation_failure, dd.quality_json, dd.quality_status,
+            dd.published_post_id
      FROM discovery_decisions dd
      JOIN discovery_candidates dc ON dc.id = dd.candidate_id`;
   const args: Array<string | number> = [];
@@ -1396,7 +1452,8 @@ export function getDiscoveryDecisions(options: { limit?: number; decision?: Edit
       generatedJson: r.generated_json == null ? null : String(r.generated_json),
       generationFailure: r.generation_failure == null ? null : String(r.generation_failure),
       qualityStatus: String(r.quality_status) as 'pending' | 'passed' | 'held' | 'rejected',
-      qualityJson: r.quality_json == null ? null : String(r.quality_json)
+      qualityJson: r.quality_json == null ? null : String(r.quality_json),
+      publishedPostId: r.published_post_id == null ? null : String(r.published_post_id)
     }));
 }
 
@@ -1634,4 +1691,246 @@ export function getPostLinks(postId: string): PostLinkRow[] {
     reason: r.reason == null ? null : String(r.reason),
     createdAt: String(r.created_at)
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Durable job queue (migration 009): scheduled_jobs + publication markers
+// ---------------------------------------------------------------------------
+
+export type ScheduledJobStatus = 'active' | 'paused' | 'terminal';
+
+export interface ScheduledJobRow {
+  id: string;
+  agentId: string;
+  jobType: string;
+  status: ScheduledJobStatus;
+  scheduleMs: number;
+  nextRunAtMs: number;
+  leaseOwner: string | null;
+  leaseExpiresAtMs: number | null;
+  attempts: number;
+  maxAttempts: number;
+  backoffMs: number;
+  idempotencyKey: string | null;
+  lastRunAtMs: number | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function mapScheduledJobRow(r: Record<string, unknown>): ScheduledJobRow {
+  return {
+    id: String(r.id),
+    agentId: String(r.agent_id),
+    jobType: String(r.job_type),
+    status: String(r.status) as ScheduledJobStatus,
+    scheduleMs: Number(r.schedule_ms),
+    nextRunAtMs: Number(r.next_run_at),
+    leaseOwner: r.lease_owner == null ? null : String(r.lease_owner),
+    leaseExpiresAtMs: r.lease_expires_at == null ? null : Number(r.lease_expires_at),
+    attempts: Number(r.attempts),
+    maxAttempts: Number(r.max_attempts),
+    backoffMs: Number(r.backoff_ms),
+    idempotencyKey: r.idempotency_key == null ? null : String(r.idempotency_key),
+    lastRunAtMs: r.last_run_at == null ? null : Number(r.last_run_at),
+    lastError: r.last_error == null ? null : String(r.last_error),
+    createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at)
+  };
+}
+
+export interface ScheduleJobInput {
+  agentId: string;
+  scheduleMs: number;
+  firstRunAtMs: number;
+  maxAttempts?: number;
+  backoffMs?: number;
+}
+
+/** Create or refresh the agent's recurring job (idempotent upsert on agent_id). */
+export function upsertScheduledJob(input: ScheduleJobInput): string {
+  const existing = getDb()
+    .prepare('SELECT id FROM scheduled_jobs WHERE agent_id = ?')
+    .get(input.agentId);
+  const nowIso = iso(input.firstRunAtMs);
+  if (existing) {
+    getDb()
+      .prepare(
+        `UPDATE scheduled_jobs
+         SET schedule_ms = ?, next_run_at = ?, max_attempts = ?, backoff_ms = ?,
+             status = 'active', lease_owner = NULL, lease_expires_at = NULL,
+             attempts = 0, last_error = NULL, updated_at = ?
+         WHERE id = ?`
+      )
+      .run(input.scheduleMs, input.firstRunAtMs, input.maxAttempts ?? 5, input.backoffMs ?? 1000, nowIso, String(existing.id));
+    return String(existing.id);
+  }
+  const id = ulid(input.firstRunAtMs);
+  getDb()
+    .prepare(
+      `INSERT INTO scheduled_jobs
+         (id, agent_id, job_type, status, schedule_ms, next_run_at, max_attempts, backoff_ms, created_at, updated_at)
+       VALUES (?, ?, 'agent_cycle', 'active', ?, ?, ?, ?, ?, ?)`
+    )
+    .run(id, input.agentId, input.scheduleMs, input.firstRunAtMs, input.maxAttempts ?? 5, input.backoffMs ?? 1000, nowIso, nowIso);
+  return id;
+}
+
+export function getScheduledJobByAgent(agentId: string): ScheduledJobRow | null {
+  const r = getDb().prepare('SELECT * FROM scheduled_jobs WHERE agent_id = ?').get(agentId);
+  return r == null ? null : mapScheduledJobRow(r as Record<string, unknown>);
+}
+
+/**
+ * Atomically claim one due occurrence. The guard lives in the WHERE clause, so
+ * only one worker (this process) wins even under concurrent claims; expired
+ * leases (crashed workers) become claimable again — restart recovery.
+ */
+export function claimScheduledJob(
+  jobId: string,
+  now: number,
+  owner: string,
+  leaseExpiresAtMs: number,
+  idempotencyKey: string,
+  expectedNextRunAtMs: number
+): boolean {
+  const res = getDb()
+    .prepare(
+      `UPDATE scheduled_jobs
+       SET lease_owner = ?, lease_expires_at = ?, idempotency_key = ?, updated_at = ?
+       WHERE id = ? AND status = 'active' AND next_run_at = ?
+         AND next_run_at <= ?
+         AND (lease_expires_at IS NULL OR lease_expires_at <= ?)`
+    )
+    .run(owner, leaseExpiresAtMs, idempotencyKey, iso(now), jobId, expectedNextRunAtMs, now, now);
+  return res.changes === 1;
+}
+
+/** Release the lease on completion/failure (next_run_at already set). */
+export function releaseScheduledJobLease(jobId: string, now: number): void {
+  getDb()
+    .prepare(
+      `UPDATE scheduled_jobs SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?`
+    )
+    .run(iso(now), jobId);
+}
+
+export interface ScheduledJobOutcome {
+  /** Occurrence succeeded: schedule the next regular occurrence. */
+  ok: boolean;
+  /** Next regular occurrence (ok=true) or retry-at (transient failure). */
+  nextRunAtMs: number;
+  /** Terminal failure recorded (attempts exhausted) — cadence continues. */
+  terminal?: boolean;
+  error?: string;
+}
+
+/** Record an occurrence outcome: advances the schedule, backoff, or terminal
+ *  failure, and clears the lease in one UPDATE. */
+export function settleScheduledJob(jobId: string, outcome: ScheduledJobOutcome, now: number): void {
+  const sets = [
+    'lease_owner = NULL',
+    'lease_expires_at = NULL',
+    'updated_at = ?'
+  ];
+  const values: Array<string | number | null> = [iso(now)];
+  if (outcome.ok) {
+    sets.push('next_run_at = ?', 'attempts = 0', 'last_error = NULL', 'last_run_at = ?');
+    values.push(outcome.nextRunAtMs, now);
+  } else {
+    sets.push('next_run_at = ?');
+    values.push(outcome.nextRunAtMs);
+    if (outcome.terminal) {
+      sets.push('last_error = ?', 'attempts = 0');
+      values.push(outcome.error ?? 'occurrence failed');
+    } else {
+      sets.push('attempts = attempts + 1');
+      if (outcome.error != null) {
+        sets.push('last_error = ?');
+        values.push(outcome.error);
+      }
+    }
+  }
+  values.push(jobId);
+  getDb().prepare(`UPDATE scheduled_jobs SET ${sets.join(', ')} WHERE id = ?`).run(...values);
+}
+
+// ---------------------------------------------------------------------------
+// Transactional gated publication (decision -> post)
+// ---------------------------------------------------------------------------
+
+export interface PublishableDecisionRow {
+  decisionId: string;
+  candidateId: string;
+  title: string;
+  canonicalUrl: string;
+  sourceName: string;
+  sourceType: string;
+  generatedJson: string;
+  qualityJson: string;
+  totalScore: number;
+}
+
+/** Gate-passed, generated, accepted decisions that have not been published
+ *  yet — the ONLY candidates for publication. */
+export function getPublishableDecisions(limit = 25): PublishableDecisionRow[] {
+  // The discovery/editorial pipeline is persona-global (one Ada persona):
+  // candidates and decisions carry no agent_id. Publication is per-agent but
+  // the global once-only guard (published_post_id) means a decision publishes
+  // at most once across all agents — the first agent's cycle to claim it wins.
+  return getDb()
+    .prepare(
+      `SELECT dd.id AS decision_id, dd.candidate_id, dc.title, dc.canonical_url,
+              dc.source_name, dc.source_type, dd.generated_json, dd.quality_json, dd.total_score
+       FROM discovery_decisions dd
+       JOIN discovery_candidates dc ON dc.id = dd.candidate_id
+       WHERE dd.decision = 'accepted'
+         AND dd.generation_status = 'generated'
+         AND dd.quality_status = 'passed'
+         AND dd.published_post_id IS NULL
+       ORDER BY dd.decided_at ASC
+       LIMIT ?`
+    )
+    .all(limit)
+    .map(r => ({
+      decisionId: String(r.decision_id),
+      candidateId: String(r.candidate_id),
+      title: String(r.title),
+      canonicalUrl: String(r.canonical_url),
+      sourceName: String(r.source_name),
+      sourceType: String(r.source_type),
+      generatedJson: String(r.generated_json),
+      qualityJson: String(r.quality_json),
+      totalScore: Number(r.total_score)
+    }));
+}
+
+/** Mark a decision as published (global once-only guard). Returns false if
+ *  another worker already published it — callers roll back their transaction. */
+export function markDecisionPublished(decisionId: string, postId: string): boolean {
+  const res = getDb()
+    .prepare(
+      `UPDATE discovery_decisions SET published_post_id = ? WHERE id = ? AND published_post_id IS NULL`
+    )
+    .run(postId, decisionId);
+  return res.changes === 1;
+}
+
+export function getScheduledJobRow(jobId: string): ScheduledJobRow | null {
+  const r = getDb().prepare('SELECT * FROM scheduled_jobs WHERE id = ?').get(jobId);
+  return r == null ? null : mapScheduledJobRow(r as Record<string, unknown>);
+}
+
+/** Due occurrences: lease free or expired (crash recovery), scheduled at/before now. */
+export function listDueJobIdsSql(now: number, limit: number): string[] {
+  return getDb()
+    .prepare(
+      `SELECT id FROM scheduled_jobs
+       WHERE status = 'active' AND next_run_at <= ?
+         AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+       ORDER BY next_run_at ASC
+       LIMIT ?`
+    )
+    .all(now, now, limit)
+    .map(r => String(r.id));
 }
