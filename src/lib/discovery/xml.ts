@@ -34,7 +34,10 @@ export function xmlField(block: string, tag: string): string | null {
   const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, 'i');
   const match = re.exec(block);
   if (!match) return null;
-  return decodeEntities(match[1].trim().replace(/\s+/g, ' '));
+  let inner = match[1];
+  // Strip a CDATA wrapper: <![CDATA[...]]>
+  inner = inner.replace(/^\s*<!\[CDATA\[/, '').replace(/\]\]>\s*$/, '');
+  return decodeEntities(inner.trim().replace(/\s+/g, ' '));
 }
 
 /** Extract a link: Atom <link href="..."/> or RSS <link>...</link>. */

@@ -28,7 +28,7 @@ function arxivQueryUrl(query: string): string {
 }
 
 /** Pure parse — exported for offline fixture tests. */
-export function parseArxivAtom(xml: string, queryPhrases: string[] = DEFAULT_PHRASES): DiscoveredCandidate[] {
+export function parseArxivAtom(xml: string): DiscoveredCandidate[] {
   const entries = extractXmlBlocks(xml, 'entry');
   const candidates: DiscoveredCandidate[] = [];
   for (const block of entries) {
