@@ -33,6 +33,7 @@ import {
   withTransaction
 } from './db';
 import { ulid } from './ids';
+import { linkRelatedPosts, recordMemoryForAccepted } from './memory';
 import { canonicalizeSourceUrl } from './urls';
 
 // ---------------------------------------------------------------------------
@@ -312,6 +313,25 @@ function finishRun(state: BackendAgentInstance, engine: EngineMeta, now: number)
           publicationId: pubId,
           publishedAtMs: now
         });
+
+        // Durable memory: record what the persona said (long-term + editorial
+        // memory) and link this post to related earlier posts via the ladder.
+        recordMemoryForAccepted(
+          state.agentId,
+          {
+            id: postId,
+            title: newPost.title,
+            summary: newPost.text,
+            canonicalUrl: canonicalUrls[0] ?? '',
+            sourceType: 'topic'
+          },
+          { nowMs: now }
+        );
+        const links = linkRelatedPosts(state.agentId, postId, now);
+        if (links.length > 0) {
+          newPost.relatedPosts = links.slice(0, 5).map(l => l.title);
+        }
+
         state.posts.unshift(newPost);
         state.pipelineStats.writeCount += 1;
         outcome = 'published';

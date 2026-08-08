@@ -6,6 +6,7 @@
 // unsupported/duplicate) and the breaking-security override are surfaced as
 // flags; the engine applies the decision rules.
 
+import type { RelevantMemory } from '../memory/memory';
 import type { EditorialFlags, ScoreComponents, ScoredCandidate, ScorableCandidate } from './types';
 
 // ---------------------------------------------------------------------------
@@ -155,6 +156,8 @@ export interface ScoringContext {
   memoryTitles: string[];
   /** CVEs appearing in ≥ 2 candidates of the current batch (corroboration). */
   corroborationCves: ReadonlySet<string>;
+  /** Durable memory context (duplicate ladder + follow-up story). */
+  memory?: RelevantMemory;
 }
 
 export function scoreCandidate(candidate: ScorableCandidate, ctx: ScoringContext): ScoredCandidate {
@@ -248,6 +251,30 @@ export function scoreCandidate(candidate: ScorableCandidate, ctx: ScoringContext
       (candidate.sourceType === 'cisa-kev' ||
         (candidate.sourceType === 'github-advisory' && hasSeverityField(raw)))
   };
+
+  // Durable-memory duplicate ladder (levels 1/2/4 = duplicate; level 3 =
+  // same-story follow-up that must carry meaningful new information).
+  const memory = ctx.memory;
+  if (memory) {
+    const { duplicate, followUp, relation, meaningful } = memory;
+    if (duplicate.level === 1 && duplicate.match) {
+      flags.duplicateUrl = duplicate.match.canonicalUrl;
+    } else if (duplicate.level === 2 && duplicate.match) {
+      flags.duplicateTitle = duplicate.match.title;
+      flags.duplicateTitleSimilarity = 1;
+    } else if (duplicate.level === 4 && duplicate.match) {
+      flags.memoryNearDuplicate = duplicate.match.title;
+    }
+    if (followUp && !flags.breakingSecurity) {
+      // A verified fresh high-severity advisory is meaningful new information
+      // by definition — the breaking-security override handles it instead.
+      if (meaningful) {
+        flags.meaningfulFollowUp = { story: followUp.item.title, relation };
+      } else {
+        flags.followUpWithoutNewInfo = followUp.item.title;
+      }
+    }
+  }
 
   return { candidate, components, total, flags };
 }

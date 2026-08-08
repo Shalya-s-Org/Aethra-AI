@@ -17,6 +17,8 @@ export const MAX_SCORE = 100;
 export const PUBLISH_THRESHOLD = 78;
 export const REJECT_THRESHOLD = 60;
 
+export type EvidenceRelation = 'confirms' | 'updates' | 'contradicts';
+
 /** Hard-rule signals that can force a rejection or bypass thresholds. */
 export interface EditorialFlags {
   /** Canonical URL was already published by an agent (posts table). */
@@ -24,6 +26,12 @@ export interface EditorialFlags {
   /** Title matches an accepted candidate (memory or higher-priority batch item). */
   duplicateTitle?: string;
   duplicateTitleSimilarity?: number;
+  /** Semantic near-duplicate found by the memory ladder (level 4). */
+  memoryNearDuplicate?: string;
+  /** Level-3 story overlap without meaningful new information (hard reject). */
+  followUpWithoutNewInfo?: string;
+  /** Level-3 story overlap WITH meaningful new information (allowed). */
+  meaningfulFollowUp?: { story: string; relation: EvidenceRelation };
   stale?: boolean;
   marketing?: boolean;
   unsupported?: boolean;

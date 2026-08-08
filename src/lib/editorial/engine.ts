@@ -19,6 +19,12 @@ import {
   upsertDiscoveryDecision
 } from '../db';
 import {
+  gatherMemoryItems,
+  getRelevantMemory,
+  recordMemoryForAccepted,
+  type RelevantMemory
+} from '../memory/memory';
+import {
   extractCve,
   maxTitleSimilarity,
   scoreCandidate,
@@ -125,6 +131,17 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
   const acceptedMemory = getAcceptedDecisionCandidates();
   const memoryTitles = acceptedMemory.map(a => a.title);
 
+  // Durable memory (persona scope): one ladder run per candidate against the
+  // same gathered memory set, so the batch is deterministic.
+  const memoryItems = gatherMemoryItems(null);
+  const memoryByCandidate = new Map<string, RelevantMemory>();
+  for (const candidate of pending) {
+    memoryByCandidate.set(
+      candidate.id,
+      getRelevantMemory(null, candidate, { items: memoryItems })
+    );
+  }
+
   // Corroboration: the same CVE in ≥ 2 candidates of this batch.
   const cveCounts = new Map<string, number>();
   for (const candidate of pending) {
@@ -135,7 +152,12 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
 
   // Score everything, then order deterministically (tie-break: score → age → URL).
   const scored = pending.map(candidate =>
-    scoreCandidate(candidate, { now, memoryTitles, corroborationCves })
+    scoreCandidate(candidate, {
+      now,
+      memoryTitles,
+      corroborationCves,
+      memory: memoryByCandidate.get(candidate.id)
+    })
   );
   scored.sort(comparePriority);
 
@@ -188,6 +210,18 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
       hardRejected = true;
       kind = 'rejected';
       reasons.push('Unsupported claims: no identifiers (CVE/GHSA/arXiv) and thin evidence.');
+    } else if (s.flags.followUpWithoutNewInfo) {
+      // An evolving story may only publish with meaningful new information.
+      hardRejected = true;
+      kind = 'rejected';
+      reasons.push(
+        `Follow-up on "${s.flags.followUpWithoutNewInfo}" without meaningful new information (no new identifiers, no new substantive content).`
+      );
+    } else if (s.flags.memoryNearDuplicate) {
+      // Semantic near-duplicate found through the similarity seam (level 4).
+      hardRejected = true;
+      kind = 'rejected';
+      reasons.push(`Near-duplicate of "${s.flags.memoryNearDuplicate}" (semantic similarity).`);
     } else if (s.total >= PUBLISH_THRESHOLD) {
       kind = 'accepted';
       reasons.push(`Score ${s.total} meets publish threshold ${PUBLISH_THRESHOLD}.`);
@@ -211,6 +245,11 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
 
     const cve = extractCve(textOf(s.candidate));
     if (cve) reasons.push(`Reference: ${cve}.`);
+    if (s.flags.meaningfulFollowUp) {
+      reasons.push(
+        `Follow-up on "${s.flags.meaningfulFollowUp.story}" — ${s.flags.meaningfulFollowUp.relation} the prior stance with new information.`
+      );
+    }
 
     entries.push({ scored: s, kind, reasons });
   }
@@ -263,6 +302,21 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
       explanation,
       decidedAtMs: now
     });
+
+    // Durable memory: accepted content becomes long-term + editorial memory
+    // (persona scope), keyed to the story subject for follow-up accumulation.
+    if (entry.kind === 'accepted') {
+      recordMemoryForAccepted(null, entry.scored.candidate, {
+        nowMs: now,
+        followUp: entry.scored.flags.meaningfulFollowUp
+          ? {
+              subject: entry.scored.flags.meaningfulFollowUp.story,
+              relation: entry.scored.flags.meaningfulFollowUp.relation
+            }
+          : undefined
+      });
+    }
+
     decisions.push(decision);
   }
 
