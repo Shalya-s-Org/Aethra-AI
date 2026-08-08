@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server';
-import { getAgentState, isSafeAgentId } from '../../../../utils/agentEngine';
+import { isSafeAgentId, peekAgentState } from '../../../../lib/agentEngine';
+import { getScheduler } from '../../../../lib/scheduler';
+
+// Always serve live state — never cached.
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -12,8 +16,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Invalid agentId." }, { status: 400 });
   }
 
-  // Retrieve isolated agent state instance; unknown ids are absent, not fabricated
-  const agent = getAgentState(agentId);
+  // The state read is the production scheduler trigger (lazy mode): it catches
+  // up all due agents against the wall clock, then serves this agent's fresh
+  // snapshot. Idempotent and crash-safe, so it is also safe when the dev
+  // interval fallback runs concurrently.
+  getScheduler().flushDue();
+
+  // Pure read after the flush: unknown ids are absent, never fabricated.
+  const agent = peekAgentState(agentId);
   if (!agent) {
     return NextResponse.json({ error: "Agent not found." }, { status: 404 });
   }

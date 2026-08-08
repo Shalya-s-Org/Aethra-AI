@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getAgentState, isSafeAgentId } from '../../../../utils/agentEngine';
+import { isSafeAgentId, peekAgentState } from '../../../../lib/agentEngine';
+
+// Always serve live feed data — never cached.
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -12,8 +15,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Invalid agentId." }, { status: 400 });
   }
 
-  // Retrieve dynamic agent state from backend; unknown ids are absent, not fabricated
-  const agent = getAgentState(agentId);
+  // READ-ONLY projection. This route never advances the pipeline, never writes
+  // to the store, and never generates content: it only returns posts that the
+  // engine already materialized (the pipeline is driven by state reads and the
+  // scheduler, never by this route). Unknown ids are absent, never fabricated.
+  const agent = peekAgentState(agentId);
   if (!agent) {
     return NextResponse.json({ error: "Agent not found." }, { status: 404 });
   }
@@ -23,7 +29,6 @@ export async function GET(request: Request) {
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
 
-  // Return compliant payload structure
   const formattedPosts = sortedPosts.map(p => ({
     id: p.id,
     createdAt: p.createdAt,

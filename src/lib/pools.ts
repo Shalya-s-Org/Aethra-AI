@@ -1,84 +1,13 @@
-import { Topic, Post, MemoryNode } from '../data/mockTopics';
+import type { Topic, Post, MemoryNode } from '../data/mockTopics';
 
 // Helper to generate unique IDs on the server
-const generateServerUUID = (prefix: string): string => {
+export const generateServerUUID = (prefix: string): string => {
   const randomSuffix = Math.random().toString(36).substring(2, 9);
   return `${prefix}-${Date.now()}-${randomSuffix}`;
 };
 
-// Map the user's audit frequency (minutes) onto a demo-friendly idle cadence.
-// The simulation runs on wall-clock seconds, so a 30-minute audit becomes an
-// ~18s demo cycle rather than a real half-hour wait.
-const demoScaledCadenceSeconds = (frequency: string): number => {
-  const minutes = Math.max(1, parseInt(frequency, 10) || 15);
-  return Math.min(60, Math.max(10, Math.round(minutes * 0.6)));
-};
-
-const nextPublishResetSeconds = (frequency: string): number => {
-  const minutes = Math.max(1, parseInt(frequency, 10) || 15);
-  return minutes * 60;
-};
-
-// Global in-memory registry for multiple autonomous agents
-const getGlobalAgentsRegistry = (): Record<string, BackendAgentInstance> => {
-  const g = globalThis as unknown as { agents?: Record<string, BackendAgentInstance> };
-  if (!g.agents) {
-    // Null-prototype object: "__proto__" is a plain key, not a prototype
-    // setter, so attacker-controlled agentIds cannot pollute the registry.
-    g.agents = Object.create(null) as Record<string, BackendAgentInstance>;
-  }
-  return g.agents;
-};
-
-// Interface for backend agent instance state
-export interface BackendAgentInstance {
-  agentId: string;
-  config: {
-    name: string;
-    role: string;
-    domain: string;
-    mission: string;
-    frequency: string;
-    style: string;
-  };
-  status: string;
-  currentActionDetails: string;
-  countdown: number;
-  secondsSinceLastScan: number;
-  missionProgress: number;
-  currentTaskName: string;
-  nextPublishSeconds: number;
-  pipelineStats: {
-    scanCount: number;
-    filterCount: number;
-    reasonCount: number;
-    memoryCount: number;
-    writeCount: number;
-    publishCount: number;
-  };
-  discoveredTopics: Topic[];
-  posts: Post[];
-  memoryNodes: MemoryNode[];
-  decisions: Topic[];
-  rejectedTodayList: Array<{ title: string; reason: string }>;
-  activeTopic: Topic | null;
-  pipelineProgress: number;
-  lastDecisionTimeSeconds: number;
-  autonomousTimelineLogs: Array<{ timestamp: string; message: string }>;
-  novaLiveFocus: {
-    focus: string;
-    goal: string;
-    reasoning: string;
-    estimatedCompletionSeconds: number;
-  };
-  
-  // Internal service variables
-  topicPool: Topic[];
-  unprocessedPool: Topic[];
-}
-
 // Domain pools definition service
-const DOMAIN_TOPIC_POOLS: Record<string, Topic[]> = {
+export const DOMAIN_TOPIC_POOLS: Record<string, Topic[]> = {
   "AI Security": [
     {
       id: "sec-1",
@@ -358,7 +287,7 @@ const DOMAIN_TOPIC_POOLS: Record<string, Topic[]> = {
 };
 
 // Fallback pool for general AI/Systems engineering (Dr. Nova)
-const DEFAULT_SYSTEMS_POOL: Topic[] = [
+export const DEFAULT_SYSTEMS_POOL: Topic[] = [
   {
     id: "sys-1",
     title: "Anthropic Releases Model Context Protocol (MCP) as Open Standard",
@@ -409,7 +338,7 @@ const DEFAULT_SYSTEMS_POOL: Topic[] = [
 ];
 
 // Initialize default seed posts for rendering history
-const getInitialSeedPosts = (domain: string, timestamp: number): Post[] => {
+export const getInitialSeedPosts = (domain: string, timestamp: number): Post[] => {
   const isSecurity = domain.toLowerCase().includes("security");
   const isRobotics = domain.toLowerCase().includes("robotics");
   const isOS = domain.toLowerCase().includes("open source") || domain.toLowerCase().includes("os");
@@ -544,7 +473,7 @@ const getInitialSeedPosts = (domain: string, timestamp: number): Post[] => {
 };
 
 // Initialize default seed memory nodes
-const getInitialSeedMemory = (domain: string): MemoryNode[] => {
+export const getInitialSeedMemory = (domain: string): MemoryNode[] => {
   return [
     {
       id: "node-seed-1",
@@ -566,7 +495,7 @@ const getInitialSeedMemory = (domain: string): MemoryNode[] => {
 };
 
 // Dynamically generate a set of custom, realistic topics for any user-configured domain
-const generatePoolForDomain = (domain: string): Topic[] => {
+export const generatePoolForDomain = (domain: string): Topic[] => {
   let concepts = domain.split(/[;,]/).map(s => s.trim()).filter(Boolean);
   if (concepts.length === 0) {
     concepts = domain.split(/\s+/).map(s => s.trim()).filter(Boolean);
@@ -575,11 +504,11 @@ const generatePoolForDomain = (domain: string): Topic[] => {
     concepts = ["Systems", "Architecture", "Optimization"];
   }
   concepts = concepts.map(c => c.charAt(0).toUpperCase() + c.slice(1));
-  
+
   const c1 = concepts[0] || "Systems";
   const c2 = concepts[1] || c1;
   const c3 = concepts[2] || c1;
-  
+
   return [
     {
       id: "dyn-1",
@@ -662,24 +591,11 @@ const generatePoolForDomain = (domain: string): Topic[] => {
   ];
 };
 
-// Start or retrieve background agent state
-export function initializeAgentInstance(
-  name: string, 
-  domain: string, 
-  customAgentId?: string,
-  customHeuristics?: { role?: string; mission?: string; frequency?: string; style?: string }
-): BackendAgentInstance {
-  const registry = getGlobalAgentsRegistry();
-  
-  const timestamp = Date.now();
-  const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, '-');
-  const agentId = customAgentId || `agent-${cleanName}-${timestamp}-${Math.random().toString(36).substring(2, 9)}`;
-  const frequency = customHeuristics?.frequency || "15";
-
-  // Find pool for domain with fuzzy matching
+// Pick the topic pool for a domain using the same fuzzy matching as the demo engine
+export const selectPoolForDomain = (domain: string): Topic[] => {
   const dLower = domain.toLowerCase();
-  let selectedPool = DEFAULT_SYSTEMS_POOL;
-  
+  let selectedPool: Topic[] = DEFAULT_SYSTEMS_POOL;
+
   if (dLower.includes("security") || dLower.includes("safe")) {
     selectedPool = DOMAIN_TOPIC_POOLS["AI Security"] || DEFAULT_SYSTEMS_POOL;
   } else if (dLower.includes("robot") || dLower.includes("servo") || dLower.includes("slam")) {
@@ -694,340 +610,6 @@ export function initializeAgentInstance(
     selectedPool = generatePoolForDomain(domain);
   }
 
-  // Deep clone pool so each agent runs with its own instances
-  selectedPool = JSON.parse(JSON.stringify(selectedPool));
-
-  const newAgent: BackendAgentInstance = {
-    agentId,
-    config: {
-      name,
-      role: customHeuristics?.role || (domain.includes("Security") ? "AI Security Researcher" : domain.includes("Robotics") ? "Robotics Systems Engineer" : domain.includes("Open Source") ? "Open Source Contributor" : "AI Systems Architect"),
-      domain,
-      mission: customHeuristics?.mission || `Publish only high-impact developments in ${domain}. Fully filter commercial marketing, hype, funding widgets, duplicate news, and unverified rumors.`,
-      frequency: customHeuristics?.frequency || "15",
-      style: customHeuristics?.style || "Professional, Analytical, Skeptical of Hype, Concise, Calm, Highly Technical"
-    },
-    status: 'idle',
-    currentActionDetails: "Observe Ecosystem: Scanning stream registers...",
-    countdown: demoScaledCadenceSeconds(frequency),
-    secondsSinceLastScan: 4,
-    missionProgress: 0,
-    currentTaskName: `Observing ${domain} ecosystem`,
-    nextPublishSeconds: nextPublishResetSeconds(frequency),
-    pipelineStats: {
-      scanCount: 17,
-      filterCount: 9,
-      reasonCount: 8,
-      memoryCount: 1,
-      writeCount: 1,
-      publishCount: 1
-    },
-    discoveredTopics: selectedPool.slice(0, 3),
-    posts: getInitialSeedPosts(domain, timestamp),
-    memoryNodes: getInitialSeedMemory(domain),
-    decisions: [],
-    rejectedTodayList: [
-      { title: "Trending AI coin generator and cat memes", reason: "Rejected: Outside criteria. Low technical engineering significance." },
-      { title: "VC Fund announces generic chatbot raising $50M", reason: "Rejected: Low novelty. Consumer wrapper app fundraising." }
-    ],
-    activeTopic: null,
-    pipelineProgress: 0,
-    lastDecisionTimeSeconds: 12,
-    autonomousTimelineLogs: [
-      { timestamp: "08:00", message: `Agent registry online. Watching ${domain} streams.` },
-      { timestamp: "08:02", message: "Scanned incoming sources. Filtered 7 low-credibility records." }
-    ],
-    novaLiveFocus: {
-      focus: "Observing AI Ecosystem",
-      goal: "Ingest live research datasets",
-      reasoning: `Monitoring arXiv, GitHub, and trusted streams for ${domain}`,
-      estimatedCompletionSeconds: 0
-    },
-    topicPool: selectedPool,
-    unprocessedPool: [...selectedPool]
-  };
-
-  registry[agentId] = newAgent;
-  
-  // Start dynamic ticking loop in-memory
-  startAgentSchedulerLoop(agentId);
-
-  return newAgent;
-}
-
-// Track the scheduler interval handle per agent so eviction can stop the loop
-// immediately instead of waiting for the next tick to self-clean.
-const schedulerLoops = new Map<string, ReturnType<typeof setInterval>>();
-
-// Tick the agent state variables in-memory to simulate real life loops on backend
-function startAgentSchedulerLoop(agentId: string) {
-  const interval = setInterval(() => {
-    const registry = getGlobalAgentsRegistry();
-    const agent = registry[agentId];
-    
-    if (!agent) {
-      clearInterval(interval);
-      schedulerLoops.delete(agentId);
-      return;
-    }
-
-    // Tick down next scans and decisions
-    agent.secondsSinceLastScan += 1;
-    agent.lastDecisionTimeSeconds += 1;
-    agent.nextPublishSeconds = agent.nextPublishSeconds <= 1 ? nextPublishResetSeconds(agent.config.frequency) : agent.nextPublishSeconds - 1;
-
-    if (agent.status === 'idle') {
-      if (agent.countdown <= 1) {
-        agent.countdown = 0;
-        // Trigger autonomous publishing sequence loop!
-        triggerAutonomousSequence(agentId);
-      } else {
-        agent.countdown -= 1;
-      }
-    }
-  }, 1000);
-  schedulerLoops.set(agentId, interval);
-}
-
-// Background simulation trigger: runs scanning -> filtering -> reasoning -> memory -> writing -> publishing -> learning
-function triggerAutonomousSequence(agentId: string) {
-  const registry = getGlobalAgentsRegistry();
-  const agent = registry[agentId];
-  if (!agent) return;
-
-  // Pull candidate topic from the pool
-  if (agent.unprocessedPool.length === 0) {
-    // Regenerate unique pool clones if run dry
-    agent.unprocessedPool = [...agent.topicPool].map(t => ({
-      ...t,
-      id: generateServerUUID(`topic-${t.id}`)
-    }));
-  }
-
-  const topic = agent.unprocessedPool.shift();
-  if (!topic) return;
-
-  agent.activeTopic = topic;
-  agent.discoveredTopics = [topic, ...agent.discoveredTopics].slice(0, 30);
-  agent.status = 'scanning';
-  agent.secondsSinceLastScan = 0;
-  agent.currentTaskName = `Ingesting ${topic.title.slice(0, 35)}...`;
-  agent.pipelineStats.scanCount += 1;
-
-  // Phase transition timeouts simulation on backend
-  const stages = [
-    { status: 'scanning', duration: 1500, details: "Observe: Ingesting code commits and RSS paper streams..." },
-    { status: 'filtering', duration: 1800, details: "Purge: Sifting out consumer hype wrappers and unverified rumors..." },
-    { status: 'reasoning', duration: 2200, details: `Evaluate: Scoring impact criteria for ${agent.config.domain} relevance...` },
-    { status: 'memory_check', duration: 1500, details: "Compare: Running cosine similarity checks against past memory..." }
-  ];
-
-  if (topic.recommendation === 'Accept') {
-    stages.push(
-      { status: 'writing', duration: 2500, details: "Synthesize: Formulating systems-centric critique and summary draft..." },
-      { status: 'publishing', duration: 1500, details: "Share: Signing release parameters & broadcasting to registry..." },
-      { status: 'learning', duration: 1500, details: "Learn: Indexing node entities and updating neural weight connections..." }
-    );
-  } else {
-    stages.push(
-      { status: 'publishing', duration: 1500, details: "Share: Logging rejection metadata to filtered registry..." },
-      { status: 'learning', duration: 1200, details: "Learn: Adapting credibility filter weights..." }
-    );
-  }
-
-  let elapsed = 0;
-  
-  stages.forEach((stage, idx) => {
-    setTimeout(() => {
-      // Re-fetch agent to guarantee state safety
-      const activeAgent = registry[agentId];
-      if (!activeAgent) return;
-
-      activeAgent.status = stage.status;
-      activeAgent.currentActionDetails = stage.details;
-      activeAgent.pipelineProgress = 0;
-      activeAgent.missionProgress = Math.round(((idx + 1) / stages.length) * 100);
-
-      // Simulate inner stage progress bar
-      let tick = 0;
-      const progressTimer = setInterval(() => {
-        if (registry[agentId]) {
-          tick += 20;
-          registry[agentId].pipelineProgress = Math.min(tick, 100);
-        }
-      }, stage.duration / 5);
-
-      setTimeout(() => clearInterval(progressTimer), stage.duration);
-
-      // Mappings for Dr. Nova focus details
-      let focus = "Observing AI Ecosystem";
-      let goal = "Ingest live research datasets";
-      let reasoning = `Scanning feeds related to ${activeAgent.config.domain}`;
-
-      if (stage.status === 'scanning') {
-        focus = `Ingesting ${topic.title.slice(0, 30)}...`;
-        goal = "Isolate technical architecture variables";
-        reasoning = "Reading raw GitHub config files & arXiv blobs";
-      } else if (stage.status === 'filtering') {
-        focus = "Purging Marketing Hype";
-        goal = "Reject consumer funding models and wraps";
-        reasoning = "Running credibility rating index checks";
-      } else if (stage.status === 'reasoning') {
-        focus = `Scoring ${topic.title.slice(0, 30)}`;
-        goal = "Assess engineering impact and utility";
-        reasoning = "Running heuristic matrix evaluation algorithms";
-      } else if (stage.status === 'memory_check') {
-        focus = "Querying Vector Memory";
-        goal = "Avoid topic repetition collisions";
-        reasoning = "Measuring cosine distance to historical indices";
-      } else if (stage.status === 'writing') {
-        focus = "Drafting System Summaries";
-        goal = "Establish opinionated engineering critiques";
-        reasoning = "Extracting system dependencies";
-      } else if (stage.status === 'publishing') {
-        focus = "Broadcasting Insight";
-        goal = "Publish signed feed entry";
-        reasoning = "Commiting hash metadata to REST feed node";
-      } else if (stage.status === 'learning') {
-        focus = "Updating Vector Indexes";
-        goal = "Expand memory graph structures";
-        reasoning = "Correlating dynamic node links";
-      }
-
-      activeAgent.novaLiveFocus = {
-        focus,
-        goal,
-        reasoning,
-        estimatedCompletionSeconds: Math.round((stages.reduce((sum, s) => sum + s.duration, 0) - elapsed) / 1000)
-      };
-
-      // Logging streams mapping
-      const now = new Date();
-      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
-      if (stage.status === 'scanning') {
-        activeAgent.autonomousTimelineLogs.push({ timestamp: timeStr, message: `Discovered topic: ${topic.title.slice(0, 38)}...` });
-      } else if (stage.status === 'filtering' && topic.recommendation === 'Reject') {
-        activeAgent.autonomousTimelineLogs.push({ timestamp: timeStr, message: `Rejected: ${topic.title.slice(0, 30)}... (Outside standard)` });
-        activeAgent.pipelineStats.filterCount += 1;
-        activeAgent.rejectedTodayList.unshift({
-          title: topic.title,
-          reason: topic.rejectionReason || "Low engineering relevance"
-        });
-      } else if (stage.status === 'reasoning') {
-        activeAgent.pipelineStats.reasonCount += 1;
-        activeAgent.autonomousTimelineLogs.push({ timestamp: timeStr, message: `Scored credibility of ${topic.title.slice(0, 20)}...: 97%` });
-      } else if (stage.status === 'publishing' && topic.recommendation === 'Accept') {
-        activeAgent.pipelineStats.publishCount += 1;
-        activeAgent.autonomousTimelineLogs.push({ timestamp: timeStr, message: `Published post: ${topic.title.slice(0, 35)}...` });
-      } else if (stage.status === 'learning') {
-        activeAgent.autonomousTimelineLogs.push({ timestamp: timeStr, message: "Synthesized graph relationships & updated index nodes." });
-      }
-
-    }, elapsed);
-
-    elapsed += stage.duration;
-  });
-
-  // Complete simulation step, resolve state to idle
-  setTimeout(() => {
-    const activeAgent = registry[agentId];
-    if (!activeAgent) return;
-
-    activeAgent.status = 'idle';
-    // Reset scan cadence from the configured audit frequency before describing the next idle sweep
-    activeAgent.countdown = demoScaledCadenceSeconds(activeAgent.config.frequency);
-    activeAgent.currentActionDetails = `Observe Ecosystem: Scanning stream registries. Next scan in ${activeAgent.countdown}s.`;
-    activeAgent.activeTopic = null;
-    activeAgent.pipelineProgress = 0;
-    activeAgent.missionProgress = 0;
-    activeAgent.currentTaskName = `Observing ${activeAgent.config.domain} streams`;
-    activeAgent.lastDecisionTimeSeconds = 0;
-
-    activeAgent.novaLiveFocus = {
-      focus: "Observing AI Ecosystem",
-      goal: "Ingest live research datasets",
-      reasoning: `Monitoring arXiv, GitHub, and trusted streams for ${activeAgent.config.domain}`,
-      estimatedCompletionSeconds: 0
-    };
-
-    activeAgent.decisions.unshift(topic);
-
-    if (topic.recommendation === 'Accept') {
-      const domainCode = activeAgent.config.domain.slice(0, 3).replace(/\s/g, '').toUpperCase() || 'SYS';
-      const pubId = `PUB-${domainCode}-${String(activeAgent.posts.length + 1).padStart(3, '0')}`;
-      
-      const newPost: Post = {
-        id: generateServerUUID('post'),
-        createdAt: new Date().toISOString(),
-        title: topic.title,
-        text: topic.detailedAnalysis || "Technical specifications and architecture verification logs committed.",
-        rationale: `Selected for high relevance to ${activeAgent.config.domain}. Importance rated at ${topic.importanceScore}/100. Overlap comparison with 18 previous memory blocks indicates novelty score of ${topic.noveltyScore}%.`,
-        opinion: topic.opinion || "No specific editorial notes added.",
-        sources: topic.sources,
-        confidenceScore: topic.confidenceScore,
-        category: topic.category,
-        importanceScore: topic.importanceScore,
-        noveltyScore: topic.noveltyScore,
-        relatedPosts: activeAgent.posts.slice(0, 1).map(p => p.title),
-        publicationId: pubId
-      };
-
-      activeAgent.posts.unshift(newPost);
-      activeAgent.pipelineStats.writeCount += 1;
-
-      // Expand memory nodes
-      const nodeTopicId = generateServerUUID('mem-topic');
-      const nodeOpinionId = generateServerUUID('mem-opinion');
-      
-      const newNodes: MemoryNode[] = [
-        {
-          id: nodeTopicId,
-          label: topic.title.split(" ")[0] || "Node",
-          group: "topic",
-          details: `${topic.title}. Published under registry ${pubId}.`,
-          connections: [nodeOpinionId, "node-seed-1"],
-          timestamp: new Date().toISOString()
-        },
-        {
-          id: nodeOpinionId,
-          label: `Opinion: ${topic.category}`,
-          group: "opinion",
-          details: topic.opinion || "No opinion",
-          connections: [nodeTopicId],
-          timestamp: new Date().toISOString()
-        }
-      ];
-
-      activeAgent.memoryNodes.push(...newNodes);
-    }
-  }, elapsed);
-}
-
-// Validate an externally-supplied agentId (e.g. from a query string) before it
-// can become a registry key. Rejects the dangerous property names and anything
-// outside a conservative [a-zA-Z0-9-] shape, and caps the length.
-export function isSafeAgentId(agentId: string): boolean {
-  if (agentId.length === 0 || agentId.length > 128) return false;
-  if (!/^[a-zA-Z0-9][a-zA-Z0-9-]*$/.test(agentId)) return false;
-  if (agentId === '__proto__' || agentId === 'constructor' || agentId === 'prototype') return false;
-  return true;
-}
-
-// Retrieve an agent's state, or null when it does not exist. No fabrication:
-// the routes decide how to answer an unknown id (404), and only init may create.
-export function getAgentState(agentId: string): BackendAgentInstance | null {
-  const registry = getGlobalAgentsRegistry();
-  return registry[agentId] || null;
-}
-
-// Evict an agent from the registry and stop its scheduler loop. Any in-flight
-// stage timers no-op because they re-fetch the registry and bail when missing.
-export function destroyAgent(agentId: string): void {
-  const loop = schedulerLoops.get(agentId);
-  if (loop) {
-    clearInterval(loop);
-    schedulerLoops.delete(agentId);
-  }
-  delete getGlobalAgentsRegistry()[agentId];
-}
+  // Deep clone so each agent runs with its own instances
+  return JSON.parse(JSON.stringify(selectedPool));
+};
