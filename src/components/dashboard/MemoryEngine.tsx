@@ -246,7 +246,7 @@ export const MemoryEngine: React.FC = () => {
               <Info className="w-3.5 h-3.5 text-cyber-cyan" /> Click nodes to inspect vector index relationships
             </div>
           </div>
-        </div>
+        </GlassCard>
 
         {/* Right Detail Inspect Panel Drawer */}
         <div className="lg:col-span-1 space-y-4">
@@ -296,7 +296,7 @@ export const MemoryEngine: React.FC = () => {
                   <h5 className="text-[9px] font-mono text-gray-500 uppercase tracking-widest mb-1">Related Publications</h5>
                   <div className="space-y-1 bg-black/40 border border-white/5 p-2 rounded">
                     {nodeDetails?.related.map((pub, idx) => (
-                      <div key={idx} className="text-gray-300 leading-normal">// {pub}</div>
+                      <div key={idx} className="text-gray-300 leading-normal">{`// ${pub}`}</div>
                     ))}
                   </div>
                 </div>
@@ -306,7 +306,7 @@ export const MemoryEngine: React.FC = () => {
                   <h5 className="text-[9px] font-mono text-gray-500 uppercase tracking-widest mb-1">Previous Mentions</h5>
                   <div className="space-y-1 bg-black/40 border border-white/5 p-2 rounded">
                     {nodeDetails?.mentions.map((men, idx) => (
-                      <div key={idx} className="text-gray-300 leading-normal">// {men}</div>
+                      <div key={idx} className="text-gray-300 leading-normal">{`// ${men}`}</div>
                     ))}
                   </div>
                 </div>
@@ -328,7 +328,7 @@ export const MemoryEngine: React.FC = () => {
                   <h5 className="text-[9px] font-mono text-gray-500 uppercase tracking-widest mb-1">Knowledge Relationships</h5>
                   <div className="space-y-1 bg-black/40 border border-white/5 p-2 rounded">
                     {nodeDetails?.relationships.map((rel, idx) => (
-                      <div key={idx} className="text-cyber-cyan font-bold">// {rel}</div>
+                      <div key={idx} className="text-cyber-cyan font-bold">{`// ${rel}`}</div>
                     ))}
                   </div>
                 </div>
@@ -338,7 +338,7 @@ export const MemoryEngine: React.FC = () => {
                   <h5 className="text-[9px] font-mono text-gray-500 uppercase tracking-widest mb-1">Memory History</h5>
                   <div className="space-y-1 bg-black/40 border border-white/5 p-2 rounded">
                     {nodeDetails?.history.map((his, idx) => (
-                      <div key={idx} className="text-gray-300">// {his}</div>
+                      <div key={idx} className="text-gray-300">{`// ${his}`}</div>
                     ))}
                   </div>
                 </div>

@@ -6,9 +6,22 @@ const generateServerUUID = (prefix: string): string => {
   return `${prefix}-${Date.now()}-${randomSuffix}`;
 };
 
+// Map the user's audit frequency (minutes) onto a demo-friendly idle cadence.
+// The simulation runs on wall-clock seconds, so a 30-minute audit becomes an
+// ~18s demo cycle rather than a real half-hour wait.
+const demoScaledCadenceSeconds = (frequency: string): number => {
+  const minutes = Math.max(1, parseInt(frequency, 10) || 15);
+  return Math.min(60, Math.max(10, Math.round(minutes * 0.6)));
+};
+
+const nextPublishResetSeconds = (frequency: string): number => {
+  const minutes = Math.max(1, parseInt(frequency, 10) || 15);
+  return minutes * 60;
+};
+
 // Global in-memory registry for multiple autonomous agents
 const getGlobalAgentsRegistry = (): Record<string, BackendAgentInstance> => {
-  const g = global as any;
+  const g = globalThis as unknown as { agents?: Record<string, BackendAgentInstance> };
   if (!g.agents) {
     g.agents = {};
   }
@@ -507,7 +520,7 @@ const getInitialSeedPosts = (domain: string, timestamp: number): Post[] => {
     concepts = domain.split(/\s+/).map(s => s.trim()).filter(Boolean);
   }
   const c1 = concepts[0] ? (concepts[0].charAt(0).toUpperCase() + concepts[0].slice(1)) : "Systems";
-  const pubCode = c1.slice(0, 3).toUpperCase();
+  const pubCode = c1.slice(0, 3).replace(/\s/g, '').toUpperCase() || 'SYS';
 
   return [
     {
@@ -659,6 +672,7 @@ export function initializeAgentInstance(
   const timestamp = Date.now();
   const cleanName = name.toLowerCase().replace(/[^a-z0-9]/g, '-');
   const agentId = customAgentId || `agent-${cleanName}-${timestamp}-${Math.random().toString(36).substring(2, 9)}`;
+  const frequency = customHeuristics?.frequency || "15";
 
   // Find pool for domain with fuzzy matching
   const dLower = domain.toLowerCase();
@@ -693,11 +707,11 @@ export function initializeAgentInstance(
     },
     status: 'idle',
     currentActionDetails: "Observe Ecosystem: Scanning stream registers...",
-    countdown: 15,
+    countdown: demoScaledCadenceSeconds(frequency),
     secondsSinceLastScan: 4,
     missionProgress: 0,
     currentTaskName: `Observing ${domain} ecosystem`,
-    nextPublishSeconds: 900, // 15 mins
+    nextPublishSeconds: nextPublishResetSeconds(frequency),
     pipelineStats: {
       scanCount: 17,
       filterCount: 9,
@@ -753,7 +767,7 @@ function startAgentSchedulerLoop(agentId: string) {
     // Tick down next scans and decisions
     agent.secondsSinceLastScan += 1;
     agent.lastDecisionTimeSeconds += 1;
-    agent.nextPublishSeconds = agent.nextPublishSeconds <= 1 ? 900 : agent.nextPublishSeconds - 1;
+    agent.nextPublishSeconds = agent.nextPublishSeconds <= 1 ? nextPublishResetSeconds(agent.config.frequency) : agent.nextPublishSeconds - 1;
 
     if (agent.status === 'idle') {
       if (agent.countdown <= 1) {
@@ -913,13 +927,14 @@ function triggerAutonomousSequence(agentId: string) {
     if (!activeAgent) return;
 
     activeAgent.status = 'idle';
+    // Reset scan cadence from the configured audit frequency before describing the next idle sweep
+    activeAgent.countdown = demoScaledCadenceSeconds(activeAgent.config.frequency);
     activeAgent.currentActionDetails = `Observe Ecosystem: Scanning stream registries. Next scan in ${activeAgent.countdown}s.`;
     activeAgent.activeTopic = null;
     activeAgent.pipelineProgress = 0;
     activeAgent.missionProgress = 0;
     activeAgent.currentTaskName = `Observing ${activeAgent.config.domain} streams`;
     activeAgent.lastDecisionTimeSeconds = 0;
-    activeAgent.countdown = 15; // Reset scan frequency ticks
 
     activeAgent.novaLiveFocus = {
       focus: "Observing AI Ecosystem",
@@ -931,7 +946,8 @@ function triggerAutonomousSequence(agentId: string) {
     activeAgent.decisions.unshift(topic);
 
     if (topic.recommendation === 'Accept') {
-      const pubId = `PUB-${activeAgent.config.domain.slice(0, 3).toUpperCase()}-${String(activeAgent.posts.length + 1).padStart(3, '0')}`;
+      const domainCode = activeAgent.config.domain.slice(0, 3).replace(/\s/g, '').toUpperCase() || 'SYS';
+      const pubId = `PUB-${domainCode}-${String(activeAgent.posts.length + 1).padStart(3, '0')}`;
       
       const newPost: Post = {
         id: generateServerUUID('post'),
