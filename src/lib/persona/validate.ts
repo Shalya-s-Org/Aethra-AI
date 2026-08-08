@@ -26,7 +26,9 @@ export interface PostDraft {
 }
 
 const IDENTIFIER_RE = /\b(CVE-\d{4}-\d{4,}|GHSA-[0-9A-Za-z-]{4,}|arxiv\.org\/abs\/\d{4}\.\d{4,})\b/i;
-const HYPE_RE = /(!{2,}|[A-Z]{4,})/;
+// 6+ consecutive capitals catches genuine ALL-CAPS hype (INSANE, REVOLUTIONARY)
+// without false-positiving on identifiers (GHSA/CVE) or acronyms (HTTPS/CVSS).
+const HYPE_RE = /(!{2,}|[A-Z]{6,})/;
 
 /**
  * Validate a finished post against the persona. Required checks must all pass
