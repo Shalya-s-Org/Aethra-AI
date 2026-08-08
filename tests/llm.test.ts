@@ -12,6 +12,7 @@ import { makeCandidate, type SourceType } from '../src/lib/discovery/types';
 import { getPersona } from '../src/lib/persona';
 import { buildGenerationPrompt } from '../src/lib/persona/prompt';
 import {
+  allowedNumbersOf,
   generatePost,
   repairJsonString,
   validateGeneratedPost,
@@ -173,8 +174,9 @@ describe('local deterministic provider', () => {
     assert.equal(outcome.post.title, CANDIDATE.title);
     assert.deepEqual(outcome.post.citedUrls, [CANDIDATE.canonicalUrl]);
     assert.equal(outcome.post.relatedPosts.length, 0);
-    // Every digit in the generated text comes from the evidence corpus.
-    const allowed = new Set(['2026', '99999', '2', '0']);
+    // Every digit in the generated text comes from the evidence corpus
+    // (title + summary + canonical URL + source name + raw evidence).
+    const allowed = allowedNumbersOf({ candidate: CANDIDATE });
     for (const token of outcome.post.text.match(/\d+/g) ?? []) {
       assert.ok(allowed.has(token), `unexpected number token "${token}" in generated text`);
     }

@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import type { Topic, Post, MemoryNode } from '../data/mockTopics';
-import type { BackendAgentInstance } from '../lib/agentTypes';
+import type { BackendAgentInstance, DiscoveryDecisionLite } from '../lib/agentTypes';
 
 export type AgentStatus = 'inactive' | 'idle' | 'scanning' | 'filtering' | 'reasoning' | 'memory_check' | 'writing' | 'publishing' | 'learning';
 
@@ -49,6 +49,8 @@ interface AgentContextType {
   posts: Post[];
   memoryNodes: MemoryNode[];
   decisions: Topic[];
+  /** Discovery-pipeline editorial decisions with quality-gate results. */
+  discoveryDecisions: DiscoveryDecisionLite[];
   rejectedTodayList: Array<{ title: string; reason: string }>;
 
   // Navigation
@@ -119,6 +121,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [posts, setPosts] = useState<Post[]>([]);
   const [memoryNodes, setMemoryNodes] = useState<MemoryNode[]>([]);
   const [decisions, setDecisions] = useState<Topic[]>([]);
+  const [discoveryDecisions, setDiscoveryDecisions] = useState<DiscoveryDecisionLite[]>([]);
   const [rejectedTodayList, setRejectedTodayList] = useState<Array<{ title: string; reason: string }>>([]);
 
   const [activeTab, setActiveTab] = useState<string>("dashboard");
@@ -225,6 +228,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setPosts(data.posts);
         setMemoryNodes(data.memoryNodes);
         setDecisions(data.decisions);
+        setDiscoveryDecisions(data.discoveryDecisions ?? []);
         setRejectedTodayList(data.rejectedTodayList);
         setActiveTopic(data.activeTopic);
         setPipelineProgress(data.pipelineProgress);
@@ -273,6 +277,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       posts,
       memoryNodes,
       decisions,
+      discoveryDecisions,
       rejectedTodayList,
       activeTab,
       setActiveTab,

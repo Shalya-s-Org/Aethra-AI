@@ -4,6 +4,7 @@ import type {
   AgentFocus,
   AgentStatus,
   BackendAgentInstance,
+  DiscoveryDecisionLite,
   EngineMeta,
   PipelineRun,
   PipelineStage
@@ -18,6 +19,7 @@ import {
   deleteAgentRow,
   findPublishedByCanonicalSource,
   getAgentRow,
+  getDiscoveryDecisions,
   getMemoryNodesByAgent,
   hasDecision,
   hasPublishedTopic,
@@ -624,11 +626,27 @@ export function flushDueAgents(now: number = Date.now()): number {
 }
 
 // Pure read: snapshot an agent WITHOUT writing anything. Used by GET /feed's
-// sibling state and by the state route after flushing.
+// sibling state and by the state route after flushing. Attaches the
+// discovery-pipeline editorial decisions (with quality-gate results) so the
+// dashboard's editorial decisions view shows both the sim and the real
+// pipeline; the sim engine itself never touches them.
 export function peekAgentState(agentId: string, now: number = Date.now()): BackendAgentInstance | null {
   const row = getAgentRow(agentId);
   if (!row) return null;
-  return snapshotAgent(row.state, row.engine, now);
+  const state = snapshotAgent(row.state, row.engine, now);
+  state.discoveryDecisions = getDiscoveryDecisions({ limit: 15 }).map(r => ({
+    id: r.id,
+    candidateId: r.candidateId,
+    title: r.title,
+    decision: r.decision,
+    totalScore: r.totalScore,
+    explanation: r.explanation,
+    decidedAt: r.decidedAt,
+    generationStatus: r.generationStatus,
+    qualityStatus: r.qualityStatus,
+    quality: r.qualityJson == null ? null : (JSON.parse(r.qualityJson) as DiscoveryDecisionLite['quality'])
+  }));
+  return state;
 }
 
 // Evict an agent durably (CASCADE removes its topics/sources/posts/decisions/

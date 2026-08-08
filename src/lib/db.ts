@@ -380,6 +380,19 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_discovery_decisions_generation
         ON discovery_decisions (generation_status);
     `
+  },
+  {
+    id: '008_quality_gate',
+    // Pre-publication quality gate over generated drafts. Every decision that
+    // went through generation carries a gate verdict (passed/held/rejected)
+    // and the full check report; gate failures flip the decision to held
+    // (retry next run) or rejected (never publish weak content).
+    sql: `
+      ALTER TABLE discovery_decisions ADD COLUMN quality_json TEXT;
+      ALTER TABLE discovery_decisions ADD COLUMN quality_status TEXT NOT NULL DEFAULT 'pending';
+      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_quality
+        ON discovery_decisions (quality_status);
+    `
   }
 ];
 
@@ -1152,6 +1165,8 @@ export type EditorialDecisionKind = 'accepted' | 'held' | 'rejected';
 export interface DiscoveryDecisionRow {
   id: string;
   candidateId: string;
+  /** Candidate headline (joined from discovery_candidates). */
+  title: string;
   decision: EditorialDecisionKind;
   totalScore: number;
   personaRelevance: number;
@@ -1166,6 +1181,8 @@ export interface DiscoveryDecisionRow {
   generationStatus: 'none' | 'generated' | 'failed';
   generatedJson: string | null;
   generationFailure: string | null;
+  qualityStatus: 'pending' | 'passed' | 'held' | 'rejected';
+  qualityJson: string | null;
 }
 
 export interface DiscoveryDecisionInput {
@@ -1190,6 +1207,11 @@ export interface DiscoveryDecisionInput {
     json?: string | null;
     failure?: string | null;
   };
+  /** Pre-publication quality gate outcome (full report JSON). */
+  quality?: {
+    status: 'pending' | 'passed' | 'held' | 'rejected';
+    json?: string | null;
+  };
 }
 
 /** Upsert one decision per candidate (re-evaluation updates in place). */
@@ -1199,8 +1221,9 @@ export function upsertDiscoveryDecision(input: DiscoveryDecisionInput): void {
       `INSERT INTO discovery_decisions
          (id, candidate_id, decision, total_score, persona_relevance, technical_impact,
           source_quality, recency, novelty, discussion_value, evidence_confidence,
-          explanation, decided_at, generated_json, generation_status, generation_failure)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          explanation, decided_at, generated_json, generation_status, generation_failure,
+          quality_json, quality_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(candidate_id) DO UPDATE SET
          decision = excluded.decision,
          total_score = excluded.total_score,
@@ -1215,7 +1238,9 @@ export function upsertDiscoveryDecision(input: DiscoveryDecisionInput): void {
          decided_at = excluded.decided_at,
          generated_json = excluded.generated_json,
          generation_status = excluded.generation_status,
-         generation_failure = excluded.generation_failure`
+         generation_failure = excluded.generation_failure,
+         quality_json = excluded.quality_json,
+         quality_status = excluded.quality_status`
     )
     .run(
       input.id,
@@ -1233,7 +1258,9 @@ export function upsertDiscoveryDecision(input: DiscoveryDecisionInput): void {
       iso(input.decidedAtMs),
       input.generation?.json ?? null,
       input.generation?.status ?? 'none',
-      input.generation?.failure ?? null
+      input.generation?.failure ?? null,
+      input.quality?.json ?? null,
+      input.quality?.status ?? 'pending'
     );
 }
 
@@ -1334,16 +1361,18 @@ export function hasPublishedCanonicalUrl(url: string): boolean {
 export function getDiscoveryDecisions(options: { limit?: number; decision?: EditorialDecisionKind } = {}): DiscoveryDecisionRow[] {
   const limit = Math.min(500, options.limit ?? 100);
   let sql =
-    `SELECT id, candidate_id, decision, total_score, persona_relevance, technical_impact,
-            source_quality, recency, novelty, discussion_value, evidence_confidence,
-            explanation, decided_at, generated_json, generation_status, generation_failure
-     FROM discovery_decisions`;
+    `SELECT dd.id, dd.candidate_id, dc.title, dd.decision, dd.total_score, dd.persona_relevance,
+            dd.technical_impact, dd.source_quality, dd.recency, dd.novelty, dd.discussion_value,
+            dd.evidence_confidence, dd.explanation, dd.decided_at, dd.generated_json,
+            dd.generation_status, dd.generation_failure, dd.quality_json, dd.quality_status
+     FROM discovery_decisions dd
+     JOIN discovery_candidates dc ON dc.id = dd.candidate_id`;
   const args: Array<string | number> = [];
   if (options.decision) {
-    sql += ' WHERE decision = ?';
+    sql += ' WHERE dd.decision = ?';
     args.push(options.decision);
   }
-  sql += ' ORDER BY decided_at DESC LIMIT ?';
+  sql += ' ORDER BY dd.decided_at DESC LIMIT ?';
   args.push(limit);
   return getDb()
     .prepare(sql)
@@ -1351,6 +1380,7 @@ export function getDiscoveryDecisions(options: { limit?: number; decision?: Edit
     .map(r => ({
       id: String(r.id),
       candidateId: String(r.candidate_id),
+      title: String(r.title),
       decision: String(r.decision) as EditorialDecisionKind,
       totalScore: Number(r.total_score),
       personaRelevance: Number(r.persona_relevance),
@@ -1364,7 +1394,34 @@ export function getDiscoveryDecisions(options: { limit?: number; decision?: Edit
       decidedAt: String(r.decided_at),
       generationStatus: String(r.generation_status) as 'none' | 'generated' | 'failed',
       generatedJson: r.generated_json == null ? null : String(r.generated_json),
-      generationFailure: r.generation_failure == null ? null : String(r.generation_failure)
+      generationFailure: r.generation_failure == null ? null : String(r.generation_failure),
+      qualityStatus: String(r.quality_status) as 'pending' | 'passed' | 'held' | 'rejected',
+      qualityJson: r.quality_json == null ? null : String(r.quality_json)
+    }));
+}
+
+/** Recently accepted decisions that carry generated output (draft openings
+ *  and titles feed the quality gate's framing/variation checks). */
+export function getRecentGeneratedAccepted(limit = 20): Array<{
+  title: string;
+  generatedJson: string;
+  decidedAt: string;
+}> {
+  return getDb()
+    .prepare(
+      `SELECT dc.title, dd.generated_json, dd.decided_at
+       FROM discovery_decisions dd
+       JOIN discovery_candidates dc ON dc.id = dd.candidate_id
+       WHERE dd.decision = 'accepted' AND dd.generation_status = 'generated'
+         AND dd.generated_json IS NOT NULL
+       ORDER BY dd.decided_at DESC
+       LIMIT ?`
+    )
+    .all(limit)
+    .map(r => ({
+      title: String(r.title),
+      generatedJson: String(r.generated_json),
+      decidedAt: String(r.decided_at)
     }));
 }
 
