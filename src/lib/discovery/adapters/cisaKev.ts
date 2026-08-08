@@ -1,5 +1,5 @@
 import { fetchJson } from '../http';
-import { makeCandidate, type AdapterResult, type DiscoveryAdapter } from '../types';
+import { makeCandidate, type AdapterResult, type DiscoveredCandidate, type DiscoveryAdapter } from '../types';
 
 // CISA Known Exploited Vulnerabilities catalog (public JSON feed). Entries
 // carry no per-entry URL, so the canonical URL is constructed from the CVE id
@@ -22,12 +22,12 @@ interface KevEntry {
 }
 
 /** Pure parse — exported for offline fixture tests. */
-export function parseCisaKev(payload: unknown): ReturnType<typeof makeCandidate>[] {
+export function parseCisaKev(payload: unknown): DiscoveredCandidate[] {
   if (!payload || typeof payload !== 'object') return [];
   const list = (payload as { vulnerabilities?: unknown }).vulnerabilities;
   if (!Array.isArray(list)) return [];
 
-  const candidates = [];
+  const candidates: DiscoveredCandidate[] = [];
   for (const raw of list) {
     if (!raw || typeof raw !== 'object') continue;
     const v = raw as KevEntry;
@@ -64,7 +64,7 @@ export const cisaKevAdapter: DiscoveryAdapter = {
   url: CISA_KEV_URL,
   async fetch(fetchImpl): Promise<AdapterResult> {
     const result = await fetchJson(fetchImpl, this.url, { retries: 2 });
-    if (!result.ok) return { candidates: [], error: result.text || `HTTP ${result.status}` };
+    if (!result.ok) return { candidates: [], error: result.error ?? 'unknown fetch error' };
     try {
       return { candidates: parseCisaKev(result.data) };
     } catch (err) {

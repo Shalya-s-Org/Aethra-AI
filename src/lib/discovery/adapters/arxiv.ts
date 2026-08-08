@@ -1,6 +1,6 @@
 import { fetchText } from '../http';
 import { extractXmlBlocks, xmlField } from '../xml';
-import { makeCandidate, type AdapterResult, type DiscoveryAdapter } from '../types';
+import { makeCandidate, type AdapterResult, type DiscoveredCandidate, type DiscoveryAdapter } from '../types';
 
 // arXiv API (Atom XML). The query is a fixed allowlisted phrase search for
 // AI-security research; it can be overridden via AETHRA_ARXIV_QUERY, which is
@@ -28,9 +28,9 @@ function arxivQueryUrl(query: string): string {
 }
 
 /** Pure parse — exported for offline fixture tests. */
-export function parseArxivAtom(xml: string, queryPhrases: string[] = DEFAULT_PHRASES): ReturnType<typeof makeCandidate>[] {
+export function parseArxivAtom(xml: string, queryPhrases: string[] = DEFAULT_PHRASES): DiscoveredCandidate[] {
   const entries = extractXmlBlocks(xml, 'entry');
-  const candidates = [];
+  const candidates: DiscoveredCandidate[] = [];
   for (const block of entries) {
     const title = xmlField(block, 'title');
     const summary = xmlField(block, 'summary');
@@ -61,7 +61,7 @@ export const arxivAdapter: DiscoveryAdapter = {
   url: arxivQueryUrl(buildArxivQuery()),
   async fetch(fetchImpl): Promise<AdapterResult> {
     const result = await fetchText(fetchImpl, this.url, { retries: 2 });
-    if (!result.ok) return { candidates: [], error: result.text || `HTTP ${result.status}` };
+    if (!result.ok) return { candidates: [], error: result.error ?? 'unknown fetch error' };
     try {
       return { candidates: parseArxivAtom(result.text) };
     } catch (err) {

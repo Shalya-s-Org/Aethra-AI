@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>arXiv Query: AI security</title>
+  <entry>
+    <id>http://arxiv.org/abs/2608.12345v2</id>
+    <updated>2026-08-01T12:00:00Z</updated>
+    <published>2026-08-01T12:00:00Z</published>
+    <title>Prompt Injection Attacks on Agentic RAG Pipelines</title>
+    <summary>We show that poisoned vector stores can bypass metadata filters and execute prompt injection against agentic retrieval pipelines.</summary>
+    <author><name>Jane Doe</name></author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2608.54321</id>
+    <published>2026-07-30T08:30:00Z</published>
+    <title>Adversarial Robustness of LLM Guardrails</title>
+    <summary>An evaluation of suffix-based jailbreak defenses across open models.</summary>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2608.11111</id>
+    <published>2026-07-29T00:00:00Z</published>
+    <title></title>
+    <summary>Missing title entry should be dropped.</summary>
+  </entry>
+</feed>

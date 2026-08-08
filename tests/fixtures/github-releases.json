@@ -1,0 +1,29 @@
+[
+  {
+    "tag_name": "v2.1.0",
+    "name": "v2.1.0 — Security hardening",
+    "published_at": "2026-07-22T16:00:00Z",
+    "html_url": "https://github.com/ollama/ollama/releases/tag/v2.1.0",
+    "body": "Fixes a sandbox escape in the model runner and updates the CVE advisory.",
+    "prerelease": false,
+    "draft": false
+  },
+  {
+    "tag_name": "v2.0.0",
+    "name": "v2.0.0",
+    "published_at": "2026-07-01T16:00:00Z",
+    "html_url": "http://github.com/ollama/ollama/releases/tag/v2.0.0",
+    "body": "Adds new model families and performance improvements.",
+    "prerelease": false,
+    "draft": false
+  },
+  {
+    "tag_name": "v2.1.1",
+    "name": "v2.1.1",
+    "published_at": "2026-07-23T16:00:00Z",
+    "html_url": "https://github.com/ollama/ollama/releases/tag/v2.1.1",
+    "body": "Fixed a prompt injection issue in tool calling.",
+    "prerelease": false,
+    "draft": false
+  }
+]

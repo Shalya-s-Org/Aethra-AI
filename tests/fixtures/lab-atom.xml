@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Lab Security Atom Feed</title>
+  <entry>
+    <title>Patch release for authentication bypass</title>
+    <link href="https://lab.example.com/security/auth-bypass"/>
+    <summary>Fixed an authentication bypass in the API gateway.</summary>
+    <published>2026-07-14T09:00:00Z</published>
+  </entry>
+</feed>

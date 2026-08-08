@@ -1,5 +1,5 @@
 import { fetchJson } from '../http';
-import { makeCandidate, type AdapterResult, type DiscoveryAdapter } from '../types';
+import { makeCandidate, type AdapterResult, type DiscoveredCandidate, type DiscoveryAdapter } from '../types';
 
 // GitHub global Security Advisory database (unauthenticated; 60 req/hr IP
 // limit). Only this allowlisted URL is ever requested.
@@ -16,9 +16,9 @@ interface GitHubAdvisory {
 }
 
 /** Pure parse — exported for offline fixture tests. */
-export function parseGithubAdvisories(payload: unknown): ReturnType<typeof makeCandidate>[] {
+export function parseGithubAdvisories(payload: unknown): DiscoveredCandidate[] {
   if (!Array.isArray(payload)) return [];
-  const candidates = [];
+  const candidates: DiscoveredCandidate[] = [];
   for (const raw of payload) {
     if (!raw || typeof raw !== 'object') continue;
     const a = raw as GitHubAdvisory;
@@ -55,7 +55,7 @@ export const githubAdvisoriesAdapter: DiscoveryAdapter = {
   url: GITHUB_ADVISORIES_URL,
   async fetch(fetchImpl): Promise<AdapterResult> {
     const result = await fetchJson(fetchImpl, this.url, { retries: 2 });
-    if (!result.ok) return { candidates: [], error: result.text || `HTTP ${result.status}` };
+    if (!result.ok) return { candidates: [], error: result.error ?? 'unknown fetch error' };
     try {
       return { candidates: parseGithubAdvisories(result.data) };
     } catch (err) {

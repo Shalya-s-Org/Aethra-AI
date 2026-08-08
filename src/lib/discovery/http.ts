@@ -8,8 +8,10 @@ export interface FetchResult {
   ok: boolean;
   /** HTTP status when a response was received; null on network/timeout. */
   status: number | null;
-  /** Response body text on success; error message on failure. */
+  /** Response body text on success. */
   text: string;
+  /** Human-readable failure reason (network error, timeout, HTTP status). */
+  error: string | null;
 }
 
 export interface FetchOptions {
@@ -60,13 +62,13 @@ export async function fetchWithRetry(
         }
       });
       if (response.ok) {
-        return { ok: true, status: response.status, text: await response.text() };
+        return { ok: true, status: response.status, text: await response.text(), error: null };
       }
       lastStatus = response.status;
       // 429 (rate limit) and 5xx are transient → retry. Other 4xx are
       // permanent (bad URL/forbidden) → fail fast without burning retries.
       if (response.status !== 429 && response.status < 500) {
-        return { ok: false, status: response.status, text: '' };
+        return { ok: false, status: response.status, text: '', error: `HTTP ${response.status}` };
       }
       lastError = `HTTP ${response.status}`;
     } catch (err) {
@@ -80,7 +82,7 @@ export async function fetchWithRetry(
     }
   }
 
-  return { ok: false, status: lastStatus, text: '' };
+  return { ok: false, status: lastStatus, text: '', error: lastError };
 }
 
 export interface JsonFetchResult extends FetchResult {
@@ -98,7 +100,7 @@ export async function fetchJson(
   try {
     return { ...result, data: JSON.parse(result.text) };
   } catch {
-    return { ok: false, status: result.status, text: '', data: undefined };
+    return { ok: false, status: result.status, text: '', data: undefined, error: 'Invalid JSON in response' };
   }
 }
 

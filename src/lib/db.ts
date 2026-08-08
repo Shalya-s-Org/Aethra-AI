@@ -254,6 +254,41 @@ const MIGRATIONS: Migration[] = [
       );
       CREATE INDEX IF NOT EXISTS idx_init_requests_agent ON init_requests (agent_id);
     `
+  },
+  {
+    id: '004_live_discovery',
+    // Live topic discovery (AI Security persona). Candidates are deduplicated
+    // by canonical https URL; per-fetch outcomes (success/failure) are kept so
+    // source reliability is auditable. Neither table feeds GET /api/agent/feed
+    // — the feed is a pure projection of posts.
+    sql: `
+      CREATE TABLE discovery_candidates (
+        id            TEXT PRIMARY KEY,
+        canonical_url TEXT NOT NULL UNIQUE,
+        title         TEXT NOT NULL,
+        summary       TEXT,
+        published_at  TEXT NOT NULL,
+        source_name   TEXT NOT NULL,
+        source_type   TEXT NOT NULL,
+        raw_evidence  TEXT NOT NULL,
+        fetched_at    TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_discovery_candidates_published
+        ON discovery_candidates (published_at DESC);
+
+      CREATE TABLE discovery_fetches (
+        id          TEXT PRIMARY KEY,
+        source_name TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        url         TEXT NOT NULL,
+        status      TEXT NOT NULL CHECK (status IN ('success','failure')),
+        item_count  INTEGER,
+        error       TEXT,
+        fetched_at  TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_discovery_fetches_source
+        ON discovery_fetches (source_name, fetched_at DESC);
+    `
   }
 ];
 
@@ -879,4 +914,139 @@ export function storeInitResponse(idempotencyKey: string, agentId: string, respo
 /** Release a stale/aborted claim so the key can be retried. */
 export function releaseInitKey(idempotencyKey: string): void {
   getDb().prepare('DELETE FROM init_requests WHERE idempotency_key = ?').run(idempotencyKey);
+}
+
+// ---------------------------------------------------------------------------
+// Live discovery (discovery_candidates + discovery_fetches)
+// ---------------------------------------------------------------------------
+
+export interface DiscoveryCandidateRow {
+  id: string;
+  canonicalUrl: string;
+  title: string;
+  summary: string | null;
+  publishedAt: string; // ISO UTC
+  sourceName: string;
+  sourceType: string;
+  rawEvidence: string;
+  fetchedAt: string; // ISO UTC
+}
+
+export interface DiscoveryFetchRow {
+  id: string;
+  sourceName: string;
+  sourceType: string;
+  url: string;
+  status: 'success' | 'failure';
+  itemCount: number | null;
+  error: string | null;
+  fetchedAt: string; // ISO UTC
+}
+
+/** Insert a discovered candidate; returns false when the canonical URL is
+ *  already known (cross-run/cross-source dedup). */
+export function insertDiscoveryCandidate(
+  candidate: {
+    id: string;
+    canonicalUrl: string;
+    title: string;
+    summary: string;
+    publishedAt: string;
+    sourceName: string;
+    sourceType: string;
+    rawEvidence: string;
+  },
+  fetchedAtMs: number
+): boolean {
+  const result = getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO discovery_candidates
+         (id, canonical_url, title, summary, published_at, source_name, source_type, raw_evidence, fetched_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      candidate.id,
+      candidate.canonicalUrl,
+      candidate.title,
+      candidate.summary,
+      candidate.publishedAt,
+      candidate.sourceName,
+      candidate.sourceType,
+      candidate.rawEvidence,
+      iso(fetchedAtMs)
+    );
+  return result.changes > 0;
+}
+
+export function insertDiscoveryFetch(input: {
+  id: string;
+  sourceName: string;
+  sourceType: string;
+  url: string;
+  status: 'success' | 'failure';
+  itemCount: number | null;
+  error: string | null;
+  fetchedAtMs: number;
+}): void {
+  getDb()
+    .prepare(
+      `INSERT INTO discovery_fetches (id, source_name, source_type, url, status, item_count, error, fetched_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      input.id,
+      input.sourceName,
+      input.sourceType,
+      input.url,
+      input.status,
+      input.itemCount,
+      input.error,
+      iso(input.fetchedAtMs)
+    );
+}
+
+export function getDiscoveryCandidates(options: { limit?: number; sinceMs?: number } = {}): DiscoveryCandidateRow[] {
+  const limit = Math.min(500, options.limit ?? 100);
+  let sql = 'SELECT * FROM discovery_candidates';
+  const args: Array<string | number> = [];
+  if (options.sinceMs !== undefined) {
+    sql += ' WHERE fetched_at >= ?';
+    args.push(iso(options.sinceMs));
+  }
+  sql += ' ORDER BY published_at DESC LIMIT ?';
+  args.push(limit);
+  return getDb()
+    .prepare(sql)
+    .all(...args)
+    .map(r => ({
+      id: String(r.id),
+      canonicalUrl: String(r.canonical_url),
+      title: String(r.title),
+      summary: r.summary == null ? null : String(r.summary),
+      publishedAt: String(r.published_at),
+      sourceName: String(r.source_name),
+      sourceType: String(r.source_type),
+      rawEvidence: String(r.raw_evidence),
+      fetchedAt: String(r.fetched_at)
+    }));
+}
+
+export function getDiscoveryFetches(options: { limit?: number } = {}): DiscoveryFetchRow[] {
+  const limit = Math.min(500, options.limit ?? 50);
+  return getDb()
+    .prepare(
+      `SELECT id, source_name, source_type, url, status, item_count, error, fetched_at
+       FROM discovery_fetches ORDER BY fetched_at DESC LIMIT ?`
+    )
+    .all(limit)
+    .map(r => ({
+      id: String(r.id),
+      sourceName: String(r.source_name),
+      sourceType: String(r.source_type),
+      url: String(r.url),
+      status: String(r.status) as 'success' | 'failure',
+      itemCount: r.item_count == null ? null : Number(r.item_count),
+      error: r.error == null ? null : String(r.error),
+      fetchedAt: String(r.fetched_at)
+    }));
 }
