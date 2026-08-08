@@ -68,6 +68,8 @@ describe('arXiv adapter', () => {
     assert.equal(first.title, 'Prompt Injection Attacks on Agentic RAG Pipelines');
     assert.ok(first.summary.includes('poisoned vector stores'));
     assert.equal(first.publishedAt, '2026-08-01T12:00:00.000Z');
+    // CDATA-wrapped titles must come out as clean text.
+    assert.equal(candidates[1].title, 'Adversarial Robustness of LLM Guardrails');
     // http id + v2 suffix → canonical https abs URL without the version.
     assert.equal(first.canonicalUrl, 'https://arxiv.org/abs/2608.12345');
     assert.equal(first.sourceType, 'arxiv');

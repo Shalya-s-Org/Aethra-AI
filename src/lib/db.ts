@@ -289,6 +289,34 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_discovery_fetches_source
         ON discovery_fetches (source_name, fetched_at DESC);
     `
+  },
+  {
+    id: '005_editorial_decisions',
+    // Deterministic editorial decisions over discovered candidates. One row per
+    // candidate (upserted on re-evaluation); every accepted/held/rejected
+    // outcome is persisted with its seven component scores and a
+    // human-readable explanation.
+    sql: `
+      CREATE TABLE discovery_decisions (
+        id                  TEXT PRIMARY KEY,
+        candidate_id        TEXT NOT NULL UNIQUE REFERENCES discovery_candidates(id) ON DELETE CASCADE,
+        decision            TEXT NOT NULL CHECK (decision IN ('accepted','held','rejected')),
+        total_score         INTEGER NOT NULL,
+        persona_relevance   INTEGER NOT NULL,
+        technical_impact    INTEGER NOT NULL,
+        source_quality      INTEGER NOT NULL,
+        recency             INTEGER NOT NULL,
+        novelty             INTEGER NOT NULL,
+        discussion_value    INTEGER NOT NULL,
+        evidence_confidence INTEGER NOT NULL,
+        explanation         TEXT NOT NULL,
+        decided_at          TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_decided
+        ON discovery_decisions (decided_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_decision
+        ON discovery_decisions (decision);
+    `
   }
 ];
 
@@ -1048,5 +1076,198 @@ export function getDiscoveryFetches(options: { limit?: number } = {}): Discovery
       itemCount: r.item_count == null ? null : Number(r.item_count),
       error: r.error == null ? null : String(r.error),
       fetchedAt: String(r.fetched_at)
+    }));
+}
+
+// ---------------------------------------------------------------------------
+// Editorial decisions (discovery_decisions)
+// ---------------------------------------------------------------------------
+
+export type EditorialDecisionKind = 'accepted' | 'held' | 'rejected';
+
+export interface DiscoveryDecisionRow {
+  id: string;
+  candidateId: string;
+  decision: EditorialDecisionKind;
+  totalScore: number;
+  personaRelevance: number;
+  technicalImpact: number;
+  sourceQuality: number;
+  recency: number;
+  novelty: number;
+  discussionValue: number;
+  evidenceConfidence: number;
+  explanation: string;
+  decidedAt: string; // ISO UTC
+}
+
+export interface DiscoveryDecisionInput {
+  id: string;
+  candidateId: string;
+  decision: EditorialDecisionKind;
+  totalScore: number;
+  components: {
+    personaRelevance: number;
+    technicalImpact: number;
+    sourceQuality: number;
+    recency: number;
+    novelty: number;
+    discussionValue: number;
+    evidenceConfidence: number;
+  };
+  explanation: string;
+  decidedAtMs: number;
+}
+
+/** Upsert one decision per candidate (re-evaluation updates in place). */
+export function upsertDiscoveryDecision(input: DiscoveryDecisionInput): void {
+  getDb()
+    .prepare(
+      `INSERT INTO discovery_decisions
+         (id, candidate_id, decision, total_score, persona_relevance, technical_impact,
+          source_quality, recency, novelty, discussion_value, evidence_confidence,
+          explanation, decided_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(candidate_id) DO UPDATE SET
+         decision = excluded.decision,
+         total_score = excluded.total_score,
+         persona_relevance = excluded.persona_relevance,
+         technical_impact = excluded.technical_impact,
+         source_quality = excluded.source_quality,
+         recency = excluded.recency,
+         novelty = excluded.novelty,
+         discussion_value = excluded.discussion_value,
+         evidence_confidence = excluded.evidence_confidence,
+         explanation = excluded.explanation,
+         decided_at = excluded.decided_at`
+    )
+    .run(
+      input.id,
+      input.candidateId,
+      input.decision,
+      input.totalScore,
+      input.components.personaRelevance,
+      input.components.technicalImpact,
+      input.components.sourceQuality,
+      input.components.recency,
+      input.components.novelty,
+      input.components.discussionValue,
+      input.components.evidenceConfidence,
+      input.explanation,
+      iso(input.decidedAtMs)
+    );
+}
+
+function mapDiscoveryCandidateRow(row: Record<string, unknown>): DiscoveryCandidateRow {
+  return {
+    id: String(row.id),
+    canonicalUrl: String(row.canonical_url),
+    title: String(row.title),
+    summary: row.summary == null ? '' : String(row.summary),
+    publishedAt: String(row.published_at),
+    sourceName: String(row.source_name),
+    sourceType: String(row.source_type),
+    rawEvidence: String(row.raw_evidence),
+    fetchedAt: String(row.fetched_at)
+  };
+}
+
+/** Candidates with no decision yet, or a held decision (retried each run). */
+export function getPendingDecisionCandidates(limit: number): DiscoveryCandidateRow[] {
+  return getDb()
+    .prepare(
+      `SELECT dc.id, dc.canonical_url, dc.title, dc.summary, dc.published_at, dc.source_name,
+              dc.source_type, dc.raw_evidence, dc.fetched_at
+       FROM discovery_candidates dc
+       LEFT JOIN discovery_decisions dd ON dd.candidate_id = dc.id
+       WHERE dd.id IS NULL OR dd.decision = 'held'
+       ORDER BY dc.published_at DESC
+       LIMIT ?`
+    )
+    .all(limit)
+    .map(r => mapDiscoveryCandidateRow(r as Record<string, unknown>));
+}
+
+/** Titles + canonical URLs of previously ACCEPTED candidates (editorial memory). */
+export function getAcceptedDecisionCandidates(): Array<{ title: string; canonicalUrl: string }> {
+  return getDb()
+    .prepare(
+      `SELECT dc.title, dc.canonical_url
+       FROM discovery_candidates dc
+       JOIN discovery_decisions dd ON dd.candidate_id = dc.id
+       WHERE dd.decision = 'accepted'`
+    )
+    .all()
+    .map(r => ({ title: String(r.title), canonicalUrl: String(r.canonical_url) }));
+}
+
+/** Latest decided_at (ms) of an accepted decision within [sinceMs, now]; null if none. */
+export function getLatestAcceptedAtMs(sinceMs: number): number | null {
+  const row = getDb()
+    .prepare(
+      `SELECT MAX(decided_at) AS m FROM discovery_decisions
+       WHERE decision = 'accepted' AND decided_at >= ?`
+    )
+    .get(iso(sinceMs));
+  if (!row || row.m == null) return null;
+  const parsed = Date.parse(String(row.m));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** Count of accepted decisions decided at or after sinceMs. */
+export function countAcceptedSinceMs(sinceMs: number): number {
+  const row = getDb()
+    .prepare(
+      `SELECT COUNT(*) AS n FROM discovery_decisions
+       WHERE decision = 'accepted' AND decided_at >= ?`
+    )
+    .get(iso(sinceMs));
+  return Number((row as { n: number }).n);
+}
+
+/** True if any agent already published a real post for this canonical URL. */
+export function hasPublishedCanonicalUrl(url: string): boolean {
+  const row = getDb()
+    .prepare(
+      `SELECT 1 FROM posts p
+       JOIN topics t ON t.id = p.topic_id
+       WHERE p.is_demo = 0 AND t.canonical_source_url = ?
+       LIMIT 1`
+    )
+    .get(url);
+  return row != null;
+}
+
+export function getDiscoveryDecisions(options: { limit?: number; decision?: EditorialDecisionKind } = {}): DiscoveryDecisionRow[] {
+  const limit = Math.min(500, options.limit ?? 100);
+  let sql =
+    `SELECT id, candidate_id, decision, total_score, persona_relevance, technical_impact,
+            source_quality, recency, novelty, discussion_value, evidence_confidence,
+            explanation, decided_at
+     FROM discovery_decisions`;
+  const args: Array<string | number> = [];
+  if (options.decision) {
+    sql += ' WHERE decision = ?';
+    args.push(options.decision);
+  }
+  sql += ' ORDER BY decided_at DESC LIMIT ?';
+  args.push(limit);
+  return getDb()
+    .prepare(sql)
+    .all(...args)
+    .map(r => ({
+      id: String(r.id),
+      candidateId: String(r.candidate_id),
+      decision: String(r.decision) as EditorialDecisionKind,
+      totalScore: Number(r.total_score),
+      personaRelevance: Number(r.persona_relevance),
+      technicalImpact: Number(r.technical_impact),
+      sourceQuality: Number(r.source_quality),
+      recency: Number(r.recency),
+      novelty: Number(r.novelty),
+      discussionValue: Number(r.discussion_value),
+      evidenceConfidence: Number(r.evidence_confidence),
+      explanation: String(r.explanation),
+      decidedAt: String(r.decided_at)
     }));
 }

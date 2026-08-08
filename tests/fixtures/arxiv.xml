@@ -12,7 +12,7 @@
   <entry>
     <id>http://arxiv.org/abs/2608.54321</id>
     <published>2026-07-30T08:30:00Z</published>
-    <title>Adversarial Robustness of LLM Guardrails</title>
+    <title><![CDATA[Adversarial Robustness of LLM Guardrails]]></title>
     <summary>An evaluation of suffix-based jailbreak defenses across open models.</summary>
   </entry>
   <entry>

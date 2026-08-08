@@ -102,11 +102,30 @@ describe('runDiscovery with mocked sources', () => {
     assert.equal(second.totalCandidates, 10, 'same candidates found again');
     assert.equal(second.newCandidates, 0, 'no new rows on replay');
     assert.equal(getDiscoveryCandidates({ limit: 100 }).length, 10);
-    assert.equal(getDiscoveryFetches().length, 10, 'fetch history grows, candidates do not');
+    // 5 fetch rows from the first test + 2 runs x 5 URLs here.
+    assert.equal(getDiscoveryFetches().length, 15, 'fetch history grows, candidates do not');
   });
 
-  it('isolates a failing source: run continues, failure is persisted', async () => {
-    const routes = fullRoutes();
+  it('isolates a failing source: run continues, fresh candidates still persist', async () => {
+    // Fresh payloads with DIFFERENT canonical URLs so the surviving sources
+    // add genuinely new rows even though earlier tests already persisted the
+    // base fixtures.
+    const fresh: Record<string, { status?: number; body?: string }> = {
+      [GITHUB_ADVISORIES_URL]: { body: JSON.stringify([
+        { ghsa_id: 'GHSA-aaaa-bbbb-cccc', cve_id: 'CVE-2026-77777', summary: 'Round 2 advisory', severity: 'high', published_at: '2026-08-01T00:00:00Z', html_url: 'https://github.com/advisories/GHSA-aaaa-bbbb-cccc' }
+      ]) },
+      [CISA_KEV_URL]: { body: JSON.stringify({
+        vulnerabilities: [
+          { cveID: 'CVE-2026-88888', vendorProject: 'X', product: 'Y', vulnerabilityName: 'Round 2 KEV', dateAdded: '2026-08-01', shortDescription: 'Round 2 exploited vuln.', requiredAction: 'Patch.', dueDate: '2026-09-01', knownRansomwareCampaignUse: 'Unknown' },
+          { cveID: 'CVE-2026-88889', vendorProject: 'X', product: 'Z', vulnerabilityName: 'Round 2b KEV', dateAdded: '2026-08-02', shortDescription: 'Another round 2 vuln.', requiredAction: 'Patch.', dueDate: '2026-09-02', knownRansomwareCampaignUse: 'Unknown' }
+        ]
+      }) },
+      [LAB_URL]: { body: fixture('lab-atom.xml') },
+      [RELEASES_URL]: { body: JSON.stringify([
+        { tag_name: 'v3.0.0', name: 'v3.0.0', published_at: '2026-08-03T00:00:00Z', html_url: 'https://github.com/ollama/ollama/releases/tag/v3.0.0', body: 'Security fix for a CVE in the runner.', prerelease: false, draft: false }
+      ]) }
+    };
+    const routes = { ...fresh };
     routes[arxivAdapter.url] = { status: 500, body: 'boom' };
     const { impl } = buildMock(routes);
 
@@ -115,9 +134,10 @@ describe('runDiscovery with mocked sources', () => {
     assert.equal(summary.failures[0].sourceName, 'arXiv');
     assert.ok(summary.failures[0].error.length > 0);
 
-    // Other sources still produced candidates.
-    assert.equal(summary.totalCandidates, 8);
-    assert.equal(getDiscoveryCandidates({ limit: 100 }).length, 18, '8 new rows on top of 10');
+    // The other sources still produced and persisted genuinely new candidates.
+    assert.equal(summary.totalCandidates, 5); // 1 advisory + 2 KEV + 1 lab + 1 release
+    assert.equal(summary.newCandidates, 5);
+    assert.equal(getDiscoveryCandidates({ limit: 100 }).length, 15, '10 prior + 5 fresh');
 
     const fetches = getDiscoveryFetches();
     const arxivFetch = fetches.find(f => f.url === arxivAdapter.url);
@@ -125,10 +145,14 @@ describe('runDiscovery with mocked sources', () => {
     assert.equal(arxivFetch.status, 'failure');
     assert.ok(arxivFetch.error, 'failure rows must carry the error');
     assert.equal(arxivFetch.itemCount, null);
+    // Fetch history: 5 (persists) + 10 (dedup) + 5 (this run: 4 ok + 1 failed).
+    assert.equal(fetches.length, 20);
+    assert.equal(fetches.filter(f => f.status === 'failure').length, 1);
+    assert.equal(fetches.filter(f => f.status === 'success').length, 19);
   });
 
   it('a source that throws is caught and reported, not fatal', async () => {
-    const { impl } = buildMock(fullRoutes());
+    buildMock(fullRoutes());
     const throwing = (async () => {
       throw new Error('socket hang up');
     }) as typeof fetch;
