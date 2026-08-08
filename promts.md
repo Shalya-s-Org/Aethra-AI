@@ -2543,3 +2543,80 @@ Requirements:
 - If validation fails, record a rejected/failed decision rather than publishing weak content
 
 Create a provider interface with a deterministic local test provider. Add unit and integration tests.
+
+## Prompt 28
+Implement a pre-publication quality gate.
+
+Reject or hold drafts that:
+- cite URLs not present in retrieved source evidence
+- use non-HTTPS or malformed URLs
+- make unsupported claims
+- repeat a recent post’s framing
+- lack a concrete technical implication
+- contain generic AI-marketing language
+- exceed the requested concise post format
+- violate persona exclusions
+- have low confidence or insufficient source quality
+
+Add originality checks:
+- require fact → interpretation → why it matters → Ada’s view
+- require at least one concrete architectural, security, or operational implication
+- vary opening patterns and phrasing
+- connect to prior editorial memory only when relevant
+
+Persist quality-gate results and make them visible in the dashboard’s editorial decisions view.
+
+## Prompt 29
+Implement genuinely autonomous orchestration.
+
+Requirements:
+- POST /api/agent/init schedules recurring durable work for the agent
+- Use an external cron/queue/job system appropriate to the selected deployment target
+- Do not rely on setInterval, setTimeout, a browser tab, or an API GET request
+- Each run must acquire a database-backed lease to avoid duplicate processing
+- Use idempotency keys and transactional publication
+- Recover safely after app restart, worker restart, timeout, or duplicate job delivery
+- Retry transient source/LLM failures with bounded exponential backoff
+- Record terminal failures for future retry without creating duplicate posts
+- Do not publish merely because a scheduled run occurred
+
+Add an accelerated 48-hour simulation mode for automated tests, without changing production behavior.
+
+## Prompt 30
+Refactor the dashboard so every displayed metric comes from real persisted data.
+
+Remove or clearly label any simulated values, fake source claims, fake cosine-similarity claims, and fabricated counters.
+
+Add views for:
+- live source health
+- candidate queue
+- editorial decisions, including rejected topics and reasons
+- post rationale and score breakdown
+- related prior posts/editorial memory
+- agent run history and failures
+
+Keep the existing visual direction, but ensure the UI never claims “live,” “verified,” “vector memory,” or “autonomous” unless backed by implemented data.
+
+## Prompt 31
+Create a full test and evaluation harness for this hackathon.
+
+Include:
+- API contract tests for init and feed
+- persistence/restart tests
+- concurrent initialization and concurrent worker-run tests
+- source failure, partial failure, database failure, and LLM failure tests
+- malformed LLM JSON and fabricated-citation tests
+- duplicate and evolving-story tests
+- persona consistency tests
+- an accelerated 48-hour simulation using deterministic source fixtures
+- assertions that GET /feed never triggers publishing
+
+Add a concise README covering:
+- required environment variables
+- local setup
+- deployment scheduler configuration
+- how to run the evaluation simulation
+- architecture diagram
+- known operational limits
+
+Run lint, typecheck, build, and the complete test suite. Report failures honestly and do not leave fake demo content in the production feed.
