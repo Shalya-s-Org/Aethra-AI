@@ -269,7 +269,7 @@ export const MemoryEngine: React.FC = () => {
                   selectedNode.group === 'model' && "bg-cyber-purple/15 text-cyber-purple border border-cyber-purple/30",
                   selectedNode.group === 'capability' && "bg-orange-500/15 text-orange-400 border border-orange-500/30",
                   selectedNode.group === 'architecture' && "bg-cyber-emerald/15 text-cyber-emerald border border-cyber-emerald/30",
-                  selectedNode.group === 'security' && "bg-red-500/15 text-red-400 border border-red-500/30",
+                  selectedNode.group === 'security' && "bg-cyber-red/15 text-cyber-red border border-cyber-red/30",
                   selectedNode.group === 'infra' && "bg-pink-500/15 text-pink-400 border border-pink-500/30"
                 )}>
                   {selectedNode.group}

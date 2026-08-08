@@ -200,8 +200,8 @@ export const FeedView: React.FC = () => {
                     {/* Why Not This competing alternative panel */}
                     <div className="border-t border-white/5 pt-3 font-mono text-[9px] space-y-2">
                       <span className="text-white block font-display uppercase tracking-widest font-bold text-[8px]">Why Not This? Competing Audit</span>
-                      <div className="p-2.5 rounded border border-red-500/20 bg-red-500/5 space-y-1">
-                        <div className="flex justify-between text-[7.5px] text-red-400">
+                      <div className="p-2.5 rounded border border-cyber-red/20 bg-cyber-red/5 space-y-1">
+                        <div className="flex justify-between text-[7.5px] text-cyber-red">
                           <span>Rejected Competing Alternative</span>
                           <span>Fluff / Rumor filtered</span>
                         </div>
@@ -474,8 +474,8 @@ export const FeedView: React.FC = () => {
                   {/* Why Not This competing option */}
                   <div className="border-t border-white/10 pt-4 font-mono text-[9px] space-y-2">
                     <span className="text-white block font-display uppercase tracking-widest font-bold">Why Not This? Competing Audit</span>
-                    <div className="p-3 rounded border border-red-500/20 bg-red-500/5 space-y-1">
-                      <div className="flex justify-between text-[8px] text-red-400">
+                    <div className="p-3 rounded border border-cyber-red/20 bg-cyber-red/5 space-y-1">
+                      <div className="flex justify-between text-[8px] text-cyber-red">
                         <span>Rejected Competing Alternative</span>
                         <span>Outside Editorial Policy</span>
                       </div>

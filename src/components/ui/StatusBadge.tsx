@@ -8,7 +8,7 @@ interface StatusBadgeProps {
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, className }) => {
   const configs = {
-    inactive: { label: 'Offline', color: 'bg-red-500', text: 'text-red-400', border: 'border-red-500/20' },
+    inactive: { label: 'Offline', color: 'bg-cyber-red', text: 'text-cyber-red', border: 'border-cyber-red/20' },
     active: { label: 'Active', color: 'bg-cyber-cyan animate-pulse', text: 'text-cyber-cyan', border: 'border-cyber-cyan/20' },
     idle: { label: 'Monitoring', color: 'bg-cyber-cyan/60 animate-pulse', text: 'text-cyber-cyan/95', border: 'border-cyber-cyan/20' },
     scanning: { label: 'Scanning', color: 'bg-blue-400 animate-pulse', text: 'text-blue-400', border: 'border-blue-400/20' },

@@ -2370,3 +2370,6 @@ Fix the HIGH UX gaps
 
 ## Prompt 17
 Persist this design system to design-system/MASTER.md (and design-system/pages/dashboard.md with the dashboard-specific overrides) for future sessions.
+
+## Prompt 18
+Add semantic color tokens (cyber-red destructive, running/queued/failed status tokens) to globals.css and replace the ad-hoc red/amber hex classes across the dashboard views.

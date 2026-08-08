@@ -86,7 +86,7 @@ export const DiscoveryQueue: React.FC = () => {
                       <span className={cn(
                         "px-1.5 py-0.5 rounded text-[8px] font-display uppercase tracking-widest font-bold",
                         topic.recommendation === 'Accept' && "bg-cyber-emerald/15 text-cyber-emerald border border-cyber-emerald/30",
-                        topic.recommendation === 'Reject' && "bg-red-500/15 text-red-400 border border-red-500/30",
+                        topic.recommendation === 'Reject' && "bg-cyber-red/15 text-cyber-red border border-cyber-red/30",
                         topic.recommendation === 'Investigate' && "bg-yellow-500/15 text-yellow-400 border border-yellow-500/30"
                       )}>
                         {topic.recommendation === 'Accept' ? 'Accepted' : topic.recommendation === 'Reject' ? 'Rejected' : 'Investigating'}
@@ -144,7 +144,7 @@ export const DiscoveryQueue: React.FC = () => {
                 <span className={cn(
                   "px-2 py-0.5 rounded text-[8px] font-display uppercase tracking-widest font-bold",
                   selectedTopic.recommendation === 'Accept' && "bg-cyber-emerald/15 text-cyber-emerald border border-cyber-emerald/30",
-                  selectedTopic.recommendation === 'Reject' && "bg-red-500/15 text-red-400 border border-red-500/30",
+                  selectedTopic.recommendation === 'Reject' && "bg-cyber-red/15 text-cyber-red border border-cyber-red/30",
                   selectedTopic.recommendation === 'Investigate' && "bg-yellow-500/15 text-yellow-400 border border-yellow-500/30"
                 )}>
                   {selectedTopic.recommendation === 'Accept' ? 'Accept' : selectedTopic.recommendation === 'Reject' ? 'Reject' : 'Queue'}
@@ -171,12 +171,12 @@ export const DiscoveryQueue: React.FC = () => {
                 </div>
 
                 {selectedTopic.recommendation === 'Reject' && selectedTopic.rejectionReason && (
-                  <div className="p-3 rounded bg-red-500/5 border border-red-500/20">
-                    <div className="flex items-center gap-1.5 text-red-400 font-display text-[9px] uppercase tracking-wider font-semibold mb-1">
+                  <div className="p-3 rounded bg-cyber-red/5 border border-cyber-red/20">
+                    <div className="flex items-center gap-1.5 text-cyber-red font-display text-[9px] uppercase tracking-wider font-semibold mb-1">
                       <ShieldAlert className="w-3.5 h-3.5" />
                       Rejection Explanation
                     </div>
-                    <p className="text-[10px] text-red-300 leading-relaxed font-sans">
+                    <p className="text-[10px] text-cyber-red leading-relaxed font-sans">
                       {selectedTopic.rejectionReason}
                     </p>
                   </div>
