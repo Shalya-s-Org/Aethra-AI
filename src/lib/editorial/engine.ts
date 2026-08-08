@@ -16,9 +16,11 @@ import {
   getAcceptedDecisionCandidates,
   getLatestAcceptedAtMs,
   getPendingDecisionCandidates,
+  getRecentGeneratedAccepted,
   hasPublishedCanonicalUrl,
   upsertDiscoveryDecision
 } from '../db';
+import { openingOf, runQualityGate, type QualityGateReport } from '../quality';
 import {
   gatherMemoryItems,
   getRelevantMemory,
@@ -75,6 +77,12 @@ interface Entry {
   scored: ScoredCandidate;
   kind: DecisionKind;
   reasons: string[];
+  /** LLM generation outcome (set during the generation phase). */
+  generation?:
+    | { status: 'generated'; json: string }
+    | { status: 'failed'; failure: string };
+  /** Pre-publication quality gate outcome (set during the generation phase). */
+  quality?: { status: 'passed' | 'held' | 'rejected'; json: string };
 }
 
 /** Total-order tie-break: higher score first, then older, then URL. */
@@ -284,6 +292,70 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
     entries.push({ scored: s, kind, reasons });
   }
 
+  // Generation + pre-publication quality gate, run BEFORE the interval/cap so
+  // a gated-out draft never consumes a routine slot. Accepted entries generate
+  // a schema-validated post; the quality gate then decides pass (stays
+  // accepted), hold (retry next run), or reject (never publish weak content).
+  const provider = options.provider ?? createLlmProvider();
+  const recent = getRecentGeneratedAccepted(20);
+  const recentTitles = recent.map(r => r.title);
+  const recentOpenings = recent.map(r => {
+    try {
+      return openingOf((JSON.parse(r.generatedJson) as { text?: string }).text ?? '');
+    } catch {
+      return '';
+    }
+  });
+  for (const entry of entries) {
+    if (entry.kind !== 'accepted') continue;
+    const outcome = await generatePost({
+      persona,
+      candidate: entry.scored.candidate,
+      followUp: entry.scored.flags.meaningfulFollowUp,
+      themes: themeHitsOf(persona, textOf(entry.scored.candidate)),
+      competing: entries.map(e => ({
+        title: e.scored.candidate.title,
+        score: e.scored.total,
+        kind: e.kind
+      })),
+      provider
+    });
+    if (!outcome.ok) {
+      entry.kind = 'rejected';
+      entry.reasons = [
+        ...entry.reasons,
+        `Generation failed (${outcome.error}). Recorded as rejected rather than publishing weak content.`
+      ];
+      entry.generation = { status: 'failed', failure: outcome.error };
+      continue;
+    }
+    entry.generation = { status: 'generated', json: outcome.raw };
+
+    const report: QualityGateReport = runQualityGate({
+      persona,
+      candidate: entry.scored.candidate,
+      draft: outcome.post,
+      followUp: entry.scored.flags.meaningfulFollowUp,
+      recentTitles,
+      recentOpenings,
+      sourceQualityScore: entry.scored.components.sourceQuality
+    });
+    entry.quality = {
+      status: report.verdict === 'pass' ? 'passed' : report.verdict === 'hold' ? 'held' : 'rejected',
+      json: JSON.stringify(report)
+    };
+    if (report.verdict !== 'pass') {
+      const held = report.verdict === 'hold';
+      entry.kind = held ? 'held' : 'rejected';
+      entry.reasons = [
+        ...entry.reasons,
+        held
+          ? `Quality gate held the draft for revision: ${report.reasons.join('; ')}`
+          : `Quality gate rejected the draft: ${report.reasons.join('; ')}`
+      ];
+    }
+  }
+
   // Routine posting interval + daily cap, applied in deterministic priority
   // order. Breaking-security overrides are exempt.
   let lastAcceptedAt = getLatestAcceptedAtMs(now - interval);
@@ -310,51 +382,16 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
     }
   }
 
-  // Persist every decision (accepted, held, rejected) with scores + explanation.
-  // Accepted entries first generate a schema-validated post via the LLM
-  // provider; a generation/validation failure flips the decision to rejected
-  // (never publishes weak content) and records the failure. Durable memory is
-  // only recorded when generation actually succeeded.
-  const provider = options.provider ?? createLlmProvider();
+  // Persist every decision (accepted, held, rejected) with scores, the
+  // generation outcome, and the quality-gate report. Durable memory is only
+  // recorded for gate-passed accepts.
   const decisions: EditorialDecision[] = [];
   for (const entry of entries) {
-    let kind = entry.kind;
-    let reasons = entry.reasons;
-    let generation:
-      | { status: 'generated'; json: string }
-      | { status: 'failed'; failure: string }
-      | undefined;
-
-    if (kind === 'accepted') {
-      const outcome = await generatePost({
-        persona,
-        candidate: entry.scored.candidate,
-        followUp: entry.scored.flags.meaningfulFollowUp,
-        themes: themeHitsOf(persona, textOf(entry.scored.candidate)),
-        competing: entries.map(e => ({
-          title: e.scored.candidate.title,
-          score: e.scored.total,
-          kind: e.kind
-        })),
-        provider
-      });
-      if (outcome.ok) {
-        generation = { status: 'generated', json: outcome.raw };
-      } else {
-        kind = 'rejected';
-        reasons = [
-          ...reasons,
-          `Generation failed (${outcome.error}). Recorded as rejected rather than publishing weak content.`
-        ];
-        generation = { status: 'failed', failure: outcome.error };
-      }
-    }
-
-    const explanation = buildExplanation(kind, entry.scored, reasons);
+    const explanation = buildExplanation(entry.kind, entry.scored, entry.reasons);
     const decision: EditorialDecision = {
       id: ulid(now),
       candidateId: entry.scored.candidate.id,
-      kind,
+      kind: entry.kind,
       totalScore: entry.scored.total,
       components: entry.scored.components,
       explanation,
@@ -363,18 +400,19 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
     upsertDiscoveryDecision({
       id: decision.id,
       candidateId: decision.candidateId,
-      decision: kind,
+      decision: decision.kind,
       totalScore: decision.totalScore,
       components: decision.components,
       explanation,
       decidedAtMs: now,
-      generation
+      generation: entry.generation,
+      quality: entry.quality
     });
 
-    // Durable memory: successfully generated content becomes long-term +
-    // editorial memory (persona scope), keyed to the story subject for
-    // follow-up accumulation, and tagged with the persona's recurring themes.
-    if (kind === 'accepted') {
+    // Durable memory: gate-passed content becomes long-term + editorial memory
+    // (persona scope), keyed to the story subject for follow-up accumulation,
+    // and tagged with the persona's recurring themes.
+    if (entry.kind === 'accepted') {
       recordMemoryForAccepted(null, entry.scored.candidate, {
         nowMs: now,
         followUp: entry.scored.flags.meaningfulFollowUp

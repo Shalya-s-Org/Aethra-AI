@@ -68,10 +68,33 @@ export interface BackendAgentInstance {
   autonomousTimelineLogs: AgentTimelineLog[];
   novaLiveFocus: AgentFocus;
 
+  /** Discovery-pipeline editorial decisions with quality-gate results
+   *  (populated on the state read; the sim engine itself never touches them). */
+  discoveryDecisions?: DiscoveryDecisionLite[];
+
   // Internal service variables (persisted with the agent; not rendered by the
   // dashboard, which simply ignores them).
   topicPool: Topic[];
   unprocessedPool: Topic[];
+}
+
+/** One discovery-pipeline decision as served to the dashboard's editorial
+ *  decisions view, including the pre-publication quality-gate outcome. */
+export interface DiscoveryDecisionLite {
+  id: string;
+  candidateId: string;
+  title: string;
+  decision: 'accepted' | 'held' | 'rejected';
+  totalScore: number;
+  explanation: string;
+  decidedAt: string;
+  generationStatus: 'none' | 'generated' | 'failed';
+  qualityStatus: 'pending' | 'passed' | 'held' | 'rejected';
+  quality: {
+    verdict: 'pass' | 'hold' | 'reject';
+    score: number;
+    checks: Array<{ id: string; label: string; passed: boolean; required: boolean; detail: string }>;
+  } | null;
 }
 
 // ---- Durable engine internals (persisted in SQLite, never sent to the client) ----

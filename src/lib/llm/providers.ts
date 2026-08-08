@@ -50,12 +50,20 @@ export class LocalDeterministicProvider implements LlmProvider {
     const sorted = [...competing].sort((a, b) => b.score - a.score);
     const rank = sorted.findIndex(c => c.title === title) + 1;
 
-    const idCount = idsOf(`${title} ${summary} ${canonicalUrl}`);
+    // Identifiers in THIS candidate's own sections (Candidate block + Evidence
+    // section — never the follow-up story or competing titles, whose
+    // identifiers may not be in this candidate's evidence) are citable: an
+    // evidence-bound draft must reference the identifiers it is about.
+    const candidateBlock = user.split('## Candidate')[1]?.split('## Editorial memory')[0] ?? user;
+    const evidenceSection = user.split('## Evidence')[1]?.split('## Output')[0] ?? '';
+    const trustedCorpus = `${candidateBlock} ${evidenceSection}`;
+    const idCount = idsOf(trustedCorpus);
+    const identifiers = [...trustedCorpus.matchAll(IDENTIFIER_RE)].map(m => m[0]).slice(0, 2);
     const confidence = idCount >= 2 ? 90 : idCount === 1 ? 80 : 60;
     const certainty = confidence >= 80 ? 'high' : confidence >= 70 ? 'medium' : 'low';
 
     const summaryLine = summary && summary !== 'none' ? summary : 'The canonical record does not include a summary.';
-    const idText = idCount > 0 ? `${title} (${(title + ' ' + summary).match(IDENTIFIER_RE)?.join(', ')})` : title;
+    const idText = identifiers.length > 0 ? `${title} (${identifiers.join(', ')})` : title;
 
     // Built strictly from evidence: no invented numbers, no invented facts.
     const text = [
