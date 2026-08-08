@@ -1,44 +1,30 @@
-import { flushDueAgents } from './agentEngine';
+// Durable scheduler abstraction — now a thin, TIMER-FREE wrapper over the
+// durable job queue (see src/lib/jobs). The agent's recurring work lives in
+// the `scheduled_jobs` table; it is driven ONLY by an external scheduler
+// (POST /api/cron/run for Vercel Cron / system cron, or the one-shot
+// `npm run worker` CLI). There is deliberately no setInterval/setTimeout, no
+// background worker process, and no API GET trigger: a scheduled run can never
+// be started by a page load, a prefetch, or a stray timer.
 
-// Durable job/scheduler abstraction.
-//
-// A "job" is a due agent pipeline run, persisted in SQLite (`next_run_at`
-// column). `flushDueAgents()` advances every due agent to the wall clock —
-// it is idempotent, crash-safe, and safe to call from multiple triggers.
-//
-// Two implementations of the same contract:
-//  - LazyScheduler (production default): no background process at all. Work
-//    runs synchronously inside the state route, so it is safe on serverless /
-//    multi-instance deployments where timers are unreliable.
-//  - IntervalScheduler (local-development fallback): a plain setInterval that
-//    calls the same durable flush, so the simulation advances even with no
-//    browser client polling. Dev-only by default; it can be force-enabled for
-//    a single-instance deployment with AETHRA_SCHEDULER=interval.
-//
-// Selection: AETHRA_SCHEDULER=lazy|interval overrides the default, which is
-// `interval` in development and `lazy` everywhere else (including `next build`).
-
-export type SchedulerMode = 'lazy' | 'interval';
+import { getJobQueue, type DueJobSummary } from './jobs';
 
 export interface Scheduler {
-  readonly mode: SchedulerMode;
-  /** Run all due jobs now. Route-triggered in lazy mode; also the interval tick. */
-  flushDue(now?: number): number;
+  /** Run all due jobs now. Cron/worker-triggered. Returns a durable summary. */
+  flushDue(now?: number): DueJobSummary | Promise<DueJobSummary>;
   start(): void;
   stop(): void;
 }
 
-class LazyScheduler implements Scheduler {
-  readonly mode: SchedulerMode = 'lazy';
-
-  flushDue(now?: number): number {
-    // Work happens inline, synchronously, on the calling request — the
-    // deployment-safe mode (see /api/agent/state).
-    return flushDueAgents(now);
+class DurableScheduler implements Scheduler {
+  async flushDue(now?: number): Promise<DueJobSummary> {
+    // The queue's clock is injectable; `now` here is advisory (used only to
+    // keep the same call surface for tests that pass a virtual time).
+    void now;
+    return getJobQueue().processDueJobs();
   }
 
   start(): void {
-    // No-op: state reads are the trigger.
+    // No-op: the external cron/worker is the only trigger.
   }
 
   stop(): void {
@@ -46,56 +32,11 @@ class LazyScheduler implements Scheduler {
   }
 }
 
-class IntervalScheduler implements Scheduler {
-  readonly mode: SchedulerMode = 'interval';
-  private timer: ReturnType<typeof setInterval> | null = null;
-  private readonly intervalMs: number;
-
-  constructor(intervalMs: number = 1000) {
-    this.intervalMs = intervalMs;
-  }
-
-  flushDue(now?: number): number {
-    return flushDueAgents(now);
-  }
-
-  start(): void {
-    if (this.timer) return;
-    this.timer = setInterval(() => {
-      try {
-        this.flushDue();
-      } catch {
-        // Never let a scheduler tick take the process down; the next tick
-        // (or the next route-triggered flush) retries.
-      }
-    }, this.intervalMs);
-    // Don't keep a script/process alive just for the dev fallback.
-    if (typeof this.timer.unref === 'function') this.timer.unref();
-  }
-
-  stop(): void {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
-  }
-}
-
 let scheduler: Scheduler | null = null;
 
 export function getScheduler(): Scheduler {
-  if (scheduler) return scheduler;
-  const env = process.env.AETHRA_SCHEDULER;
-  const mode: SchedulerMode =
-    env === 'lazy' || env === 'interval'
-      ? env
-      : process.env.NODE_ENV === 'development'
-        ? 'interval'
-        : 'lazy';
-  scheduler = mode === 'interval' ? new IntervalScheduler() : new LazyScheduler();
+  if (!scheduler) scheduler = new DurableScheduler();
   return scheduler;
 }
 
-// Start the selected scheduler at module load. In production this is the
-// lazy no-op; in development it spawns the interval fallback.
-getScheduler().start();
+// Intentionally NOT started: there is no background loop anymore.

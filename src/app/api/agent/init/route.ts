@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { initializeAgentInstance } from '../../../../lib/agentEngine';
+import { scheduleAgentJob } from '../../../../lib/jobs/schedule';
 import { validateInitRequest } from '../../../../lib/initSchema';
 import {
   claimInitKey,
@@ -105,7 +106,8 @@ export async function POST(request: Request) {
     }
   }
 
-  // 6. Create the agent. All content rows persist atomically (see engine).
+  // 6. Create the agent. All content rows persist atomically (see engine),
+  //    and its recurring durable job is scheduled for the external cron/queue.
   try {
     const agent = initializeAgentInstance(persona.name, persona.domain, undefined, {
       role: persona.role,
@@ -113,6 +115,8 @@ export async function POST(request: Request) {
       frequency: persona.frequency,
       style: persona.style
     });
+
+    scheduleAgentJob(agent.agentId, persona.frequency);
 
     const responseBody = {
       agentId: agent.agentId,

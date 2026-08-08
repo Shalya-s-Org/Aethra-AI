@@ -228,7 +228,12 @@ function startRun(state: BackendAgentInstance, engine: EngineMeta, now: number):
 // Finish the active run: record the editorial decision, publish accepted
 // topics (unless the canonical topic/source was already published by this
 // agent), expand memory, and schedule the next run.
-function finishRun(state: BackendAgentInstance, engine: EngineMeta, now: number): void {
+function finishRun(
+  state: BackendAgentInstance,
+  engine: EngineMeta,
+  now: number,
+  opts: { publish?: boolean } = {}
+): void {
   const run = engine.run;
   if (!run) return;
   const { topic, topicId, runId } = run;
@@ -270,7 +275,12 @@ function finishRun(state: BackendAgentInstance, engine: EngineMeta, now: number)
 
   let outcome: 'published' | 'rejected' | 'duplicate' | 'skipped' = 'skipped';
 
-  if (topic.recommendation === 'Accept') {
+  // The durable orchestration advances the sim for visualization with
+  // publish=false: a scheduled run must never publish posts by itself — the
+  // only publication path is the gated editorial pipeline (see jobs/cycle.ts).
+  const doPublish = opts.publish ?? true;
+
+  if (doPublish && topic.recommendation === 'Accept') {
     // Duplicate-publication guard: never publish the same canonical topic
     // (topic_id) or canonical source URL twice for this agent.
     const alreadyPublished =
@@ -384,7 +394,12 @@ function finishRun(state: BackendAgentInstance, engine: EngineMeta, now: number)
 // Advance an agent's durable state to `now`: apply due stage transitions,
 // start runs that are due, and roll the publish countdown forward. Pure
 // function over (state, engine); the caller persists afterwards.
-function advanceTo(state: BackendAgentInstance, engine: EngineMeta, now: number): void {
+function advanceTo(
+  state: BackendAgentInstance,
+  engine: EngineMeta,
+  now: number,
+  opts: { publish?: boolean } = {}
+): void {
   // Roll the publish countdown forward by whole periods so the readout never
   // goes stale (mirrors the old tick resetting it when it reached zero).
   const publishPeriodMs = nextPublishResetSeconds(state.config.frequency) * 1000;
@@ -406,7 +421,7 @@ function advanceTo(state: BackendAgentInstance, engine: EngineMeta, now: number)
   }
 
   if (idx >= run.stages.length) {
-    finishRun(state, engine, now);
+    finishRun(state, engine, now, opts);
     return;
   }
 
@@ -605,13 +620,17 @@ export function initializeAgentInstance(
 
 // Advance a single agent to `now` and return its fresh snapshot (or null if it
 // does not exist). Safe to call repeatedly: once caught up, it is a no-op.
-export function advanceAgentById(agentId: string, now: number = Date.now()): BackendAgentInstance | null {
+export function advanceAgentById(
+  agentId: string,
+  now: number = Date.now(),
+  opts: { publish?: boolean } = {}
+): BackendAgentInstance | null {
   const row = getAgentRow(agentId);
   if (!row) return null;
   // Atomic advance: stage transitions, content rows, and the snapshot persist
   // together — a crash mid-run never leaves a torn state.
   withTransaction(() => {
-    advanceTo(row.state, row.engine, now);
+    advanceTo(row.state, row.engine, now, opts);
     putAgentRow(row.state, row.engine, now);
   });
   return snapshotAgent(row.state, row.engine, now);
