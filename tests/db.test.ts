@@ -68,7 +68,9 @@ describe('agent persistence', () => {
     assert.ok(row, 'agent must exist after reopen');
     assert.equal(row.state.config.name, 'DB Test');
     assert.equal(row.state.posts.length, 1); // seed post survived
-    assert.equal(getPostsByAgent(agentId).length, 1);
+    // The seed is demo-only: hidden from the judged feed, visible with includeDemo.
+    assert.equal(getPostsByAgent(agentId).length, 0);
+    assert.equal(getPostsByAgent(agentId, { includeDemo: true }).length, 1);
   });
 
   it('shows up in the due list after its next_run_at', () => {
@@ -126,9 +128,13 @@ describe('posts', () => {  it('orders feed newest-first', () => {
 
     const posts = getPostsByAgent(agentId);
     const titles = posts.map(p => p.title);
-    // createAgent() also seeds one post (2h in the past), so it sorts last.
-    assert.deepEqual(titles.slice(0, 3), ['Newest', 'Middle', 'Oldest'], 'expected newest-first feed order');
-    assert.equal(titles.length, 4, 'seed post should sort after the three inserted');
+    // Demo seeds are excluded from the judged feed.
+    assert.deepEqual(titles, ['Newest', 'Middle', 'Oldest'], 'expected newest-first feed order');
+    // includeDemo brings the seed in; it is 2h old, so it sorts last.
+    const all = getPostsByAgent(agentId, { includeDemo: true });
+    assert.equal(all.length, 4);
+    assert.ok(all[3].isDemo, 'seed should sort after the three inserted and be marked demo');
+    assert.ok(!titles.includes(all[3].title), 'seed must not appear in the judged feed');
   });
 
   it('rejects a second post for the same agent + topic (UNIQUE backstop)', () => {
@@ -186,9 +192,73 @@ describe('posts', () => {  it('orders feed newest-first', () => {
         }),
       /UNIQUE/
     );
-    // Seed post + the one we inserted = 2; the duplicate insert must not land.
-    assert.equal(countPosts(agentId), 2);
+    // Seed post is demo-only (not counted); the duplicate insert must not land.
+    assert.equal(countPosts(agentId), 1);
     assert.ok(hasPublishedTopic(agentId, topicId));
+  });
+});
+
+describe('demo posts are excluded from the judged feed and duplicate checks', () => {
+  it('marks seeds demo-only: hidden from feed, ignored by dup prevention', () => {
+    const agentId = createAgent();
+    // The demo seed is excluded from the judged feed and the real-post count.
+    assert.equal(getPostsByAgent(agentId).length, 0);
+    assert.equal(countPosts(agentId), 0);
+    const demo = getPostsByAgent(agentId, { includeDemo: true });
+    assert.equal(demo.length, 1);
+    assert.ok(demo[0].isDemo);
+
+    // The seed's topic must NOT count as a published topic or canonical source.
+    const seedTopic = getDb()
+      .prepare("SELECT id FROM topics WHERE agent_id = ? AND canonical_source_url LIKE 'demo:%'")
+      .get(agentId);
+    assert.ok(seedTopic, 'seed topic row must exist with a demo: canonical key');
+    const seedTopicId = String((seedTopic as { id: string }).id);
+    assert.ok(!hasPublishedTopic(agentId, seedTopicId), 'demo topic must not block real publications');
+    assert.ok(
+      !findPublishedByCanonicalSource(agentId, demo[0].sources),
+      'demo sources must not block real publications'
+    );
+
+    // A real post on a real (non-demo) topic then publishes and registers
+    // normally, proving demo rows never interfere with the duplicate backstop.
+    const realTopicId = upsertTopicRow({
+      agentId,
+      title: 'Real Topic',
+      canonicalSourceUrl: 'https://example.com/real-topic',
+      category: null,
+      sourceName: null,
+      credibilityScore: null,
+      trendScore: null,
+      noveltyScore: null,
+      importanceScore: null,
+      confidenceScore: null,
+      recommendation: null,
+      rejectionReason: null,
+      detailedAnalysis: null,
+      opinion: null,
+      freshness: null,
+      rawJson: '{}',
+      createdAtMs: T0
+    });
+    insertPost({
+      id: ulid(T0 + 10_000),
+      agentId,
+      topicId: realTopicId,
+      title: 'Real Post',
+      body: 'b',
+      opinion: null,
+      rationale: null,
+      confidenceScore: null,
+      category: null,
+      importanceScore: null,
+      noveltyScore: null,
+      publicationId: null,
+      publishedAtMs: T0 + 10_000
+    });
+    assert.equal(countPosts(agentId), 1);
+    assert.ok(hasPublishedTopic(agentId, realTopicId));
+    assert.ok(!hasPublishedTopic(agentId, seedTopicId), 'demo topic must stay unpublished');
   });
 });
 
