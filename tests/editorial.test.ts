@@ -279,6 +279,8 @@ describe('tie-breaks', () => {
     const run = await runEditorial(opts);
     const d1 = decisionOf(run, older.id);
     const d2 = decisionOf(run, newer.id);
+    console.error('TIE-DEBUG d1:', d1.kind, d1.totalScore, '|', d1.explanation);
+    console.error('TIE-DEBUG d2:', d2.kind, d2.totalScore, '|', d2.explanation);
     assert.equal(d1.totalScore, d2.totalScore, 'scores must tie');
     assert.equal(d1.kind, 'accepted', 'older candidate wins the slot');
     assert.equal(d2.kind, 'held');
@@ -363,6 +365,7 @@ describe('breaking-security override', () => {
     assert.equal(decisionOf(run, routine.id).kind, 'accepted');
 
     const d = decisionOf(run, kev.id);
+    console.error('KEV-DEBUG:', d.kind, d.totalScore, '|', d.explanation);
     assert.equal(d.kind, 'accepted', 'breaking override must accept despite low score + interval');
     assert.ok(d.totalScore < 78, `override must not depend on the threshold (score ${d.totalScore})`);
     assert.match(d.explanation, /Breaking-security override/);

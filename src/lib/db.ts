@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { BackendAgentInstance, EngineMeta } from './agentTypes';
 import { ulid } from './ids';
+import { titleHash } from './memory/similarity';
 
 // Durable persistence via Node's built-in SQLite (node:sqlite — Node 24).
 // Zero extra dependencies, real SQL, WAL mode, and a versioned migration
@@ -317,6 +318,54 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_discovery_decisions_decision
         ON discovery_decisions (decision);
     `
+  },
+  {
+    id: '006_durable_memory',
+    // Durable agent/persona memory + post-to-post links.
+    //   memory_entries  short-term / long-term / editorial memory, keyed by
+    //                   (COALESCE(agent_id,''), kind, subject). agent_id NULL
+    //                   = persona scope (the discovery/editorial pipeline); a
+    //                   real agent id = that agent's scope. UNIQUE via the
+    //                   expression index so NULL agent_ids still dedupe.
+    //   post_links      which earlier posts a new post relates to, and how
+    //                   (follow_up / confirms / updates / contradicts / related).
+    //   posts.title_hash  normalized-title hash for the level-2 duplicate
+    //                   check (exact normalized-title matches, indexable).
+    sql: `
+      CREATE TABLE memory_entries (
+        id            TEXT PRIMARY KEY,
+        agent_id      TEXT REFERENCES agents(id) ON DELETE CASCADE,
+        kind          TEXT NOT NULL CHECK (kind IN ('short_term','long_term','editorial')),
+        subject       TEXT NOT NULL,
+        content       TEXT NOT NULL,
+        importance    INTEGER NOT NULL DEFAULT 1,
+        occurrences   INTEGER NOT NULL DEFAULT 1,
+        metadata_json TEXT,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at  TEXT NOT NULL,
+        created_at    TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX idx_memory_scope_subject
+        ON memory_entries (COALESCE(agent_id, ''), kind, subject);
+      CREATE INDEX idx_memory_scope_kind
+        ON memory_entries (agent_id, kind, last_seen_at DESC);
+
+      CREATE TABLE post_links (
+        id              TEXT PRIMARY KEY,
+        post_id         TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+        related_post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+        relation_type   TEXT NOT NULL CHECK (relation_type IN ('follow_up','confirms','updates','contradicts','related')),
+        similarity      REAL,
+        reason          TEXT,
+        created_at      TEXT NOT NULL,
+        UNIQUE (post_id, related_post_id, relation_type)
+      );
+      CREATE INDEX idx_post_links_post ON post_links (post_id);
+      CREATE INDEX idx_post_links_related ON post_links (related_post_id);
+
+      ALTER TABLE posts ADD COLUMN title_hash TEXT;
+      CREATE INDEX idx_posts_title_hash ON posts (title_hash);
+    `
   }
 ];
 
@@ -611,16 +660,17 @@ export interface PostInput {
 export function insertPost(input: PostInput): void {
   getDb()
     .prepare(
-      `INSERT INTO posts (id, agent_id, topic_id, title, body, opinion, rationale,
+      `INSERT INTO posts (id, agent_id, topic_id, title, title_hash, body, opinion, rationale,
                           confidence_score, category, importance_score, novelty_score,
                           publication_id, published_at, is_demo)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       input.id,
       input.agentId,
       input.topicId,
       input.title,
+      titleHash(input.title),
       input.body,
       input.opinion,
       input.rationale,
@@ -1188,17 +1238,31 @@ export function getPendingDecisionCandidates(limit: number): DiscoveryCandidateR
     .map(r => mapDiscoveryCandidateRow(r as Record<string, unknown>));
 }
 
-/** Titles + canonical URLs of previously ACCEPTED candidates (editorial memory). */
-export function getAcceptedDecisionCandidates(): Array<{ title: string; canonicalUrl: string }> {
+/** Accepted candidates as short-term editorial memory (id, title, summary,
+ *  canonical URL), newest first, bounded — the duplicate ladder's memory set
+ *  for the persona scope. */
+export function getAcceptedDecisionCandidates(): Array<{
+  id: string;
+  title: string;
+  summary: string;
+  canonicalUrl: string;
+}> {
   return getDb()
     .prepare(
-      `SELECT dc.title, dc.canonical_url
+      `SELECT dc.id, dc.title, dc.summary, dc.canonical_url
        FROM discovery_candidates dc
        JOIN discovery_decisions dd ON dd.candidate_id = dc.id
-       WHERE dd.decision = 'accepted'`
+       WHERE dd.decision = 'accepted'
+       ORDER BY dd.decided_at DESC
+       LIMIT 500`
     )
     .all()
-    .map(r => ({ title: String(r.title), canonicalUrl: String(r.canonical_url) }));
+    .map(r => ({
+      id: String(r.id),
+      title: String(r.title),
+      summary: r.summary == null ? '' : String(r.summary),
+      canonicalUrl: String(r.canonical_url)
+    }));
 }
 
 /** Latest decided_at (ms) of an accepted decision within [sinceMs, now]; null if none. */
@@ -1270,4 +1334,215 @@ export function getDiscoveryDecisions(options: { limit?: number; decision?: Edit
       explanation: String(r.explanation),
       decidedAt: String(r.decided_at)
     }));
+}
+
+// ---------------------------------------------------------------------------
+// Durable memory (migration 006): memory_entries + post_links
+// ---------------------------------------------------------------------------
+
+export type MemoryKind = 'short_term' | 'long_term' | 'editorial';
+
+export interface MemoryEntryRow {
+  id: string;
+  agentId: string | null; // null = persona scope (discovery/editorial pipeline)
+  kind: MemoryKind;
+  subject: string;
+  content: string;
+  importance: number;
+  occurrences: number;
+  metadata: Record<string, unknown>;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  createdAt: string;
+}
+
+function mapMemoryEntryRow(r: Record<string, unknown>): MemoryEntryRow {
+  const metaRaw = r.metadata_json == null ? null : String(r.metadata_json);
+  let metadata: Record<string, unknown> = {};
+  if (metaRaw) {
+    try {
+      metadata = JSON.parse(metaRaw) as Record<string, unknown>;
+    } catch {
+      metadata = {};
+    }
+  }
+  return {
+    id: String(r.id),
+    agentId: r.agent_id == null ? null : String(r.agent_id),
+    kind: String(r.kind) as MemoryKind,
+    subject: String(r.subject),
+    content: String(r.content),
+    importance: Number(r.importance),
+    occurrences: Number(r.occurrences),
+    metadata,
+    firstSeenAt: String(r.first_seen_at),
+    lastSeenAt: String(r.last_seen_at),
+    createdAt: String(r.created_at)
+  };
+}
+
+export interface UpsertMemoryEntryInput {
+  agentId: string | null;
+  kind: MemoryKind;
+  subject: string;
+  content: string;
+  importance?: number;
+  metadata?: Record<string, unknown>;
+  nowMs: number;
+}
+
+/** Upsert a memory entry keyed by (scope, kind, subject): the first sighting
+ *  creates it; later sightings bump occurrences + last_seen_at and refresh the
+ *  content (e.g. the persona's latest stance on a story). */
+export function upsertMemoryEntry(input: UpsertMemoryEntryInput): void {
+  const d = getDb();
+  const existing = d
+    .prepare(
+      `SELECT id, occurrences FROM memory_entries
+       WHERE COALESCE(agent_id, '') = COALESCE(?, '') AND kind = ? AND subject = ?`
+    )
+    .get(input.agentId ?? '', input.kind, input.subject);
+  const nowIso = iso(input.nowMs);
+  const importance = input.importance ?? 1;
+  const meta = JSON.stringify(input.metadata ?? null);
+  if (existing) {
+    d.prepare(
+      `UPDATE memory_entries
+       SET content = ?, importance = ?, occurrences = occurrences + 1,
+           metadata_json = ?, last_seen_at = ?
+       WHERE id = ?`
+    ).run(input.content, importance, meta, nowIso, String(existing.id));
+  } else {
+    d.prepare(
+      `INSERT INTO memory_entries
+       (id, agent_id, kind, subject, content, importance, occurrences,
+        metadata_json, first_seen_at, last_seen_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`
+    ).run(
+      ulid(),
+      input.agentId,
+      input.kind,
+      input.subject,
+      input.content,
+      importance,
+      meta,
+      nowIso,
+      nowIso,
+      nowIso
+    );
+  }
+}
+
+export function getMemoryEntryBySubject(
+  agentId: string | null,
+  kind: MemoryKind,
+  subject: string
+): MemoryEntryRow | null {
+  const row = getDb()
+    .prepare(
+      `SELECT * FROM memory_entries
+       WHERE COALESCE(agent_id, '') = COALESCE(?, '') AND kind = ? AND subject = ?`
+    )
+    .get(agentId ?? '', kind, subject);
+  return row ? mapMemoryEntryRow(row) : null;
+}
+
+export function getRecentMemoryEntries(opts: {
+  agentId: string | null;
+  kinds: MemoryKind[];
+  limit: number;
+}): MemoryEntryRow[] {
+  const placeholders = opts.kinds.map(() => '?').join(',');
+  const rows = getDb()
+    .prepare(
+      `SELECT * FROM memory_entries
+       WHERE COALESCE(agent_id, '') = COALESCE(?, '') AND kind IN (${placeholders})
+       ORDER BY last_seen_at DESC
+       LIMIT ?`
+    )
+    .all(opts.agentId ?? '', ...opts.kinds, opts.limit);
+  return rows.map(mapMemoryEntryRow);
+}
+
+/** Recent real (non-demo) posts of an agent, with canonical source URLs —
+ *  short-term memory and the link-ladder's memory set for an agent scope. */
+export interface PostMemoryRow {
+  id: string;
+  title: string;
+  body: string;
+  publishedAt: string;
+  canonicalUrl: string | null;
+  titleHash: string | null;
+}
+
+export function getRecentPostsForMemory(agentId: string, limit = 100): PostMemoryRow[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT p.id, p.title, p.body, p.published_at, p.title_hash, t.canonical_source_url
+       FROM posts p LEFT JOIN topics t ON t.id = p.topic_id
+       WHERE p.agent_id = ? AND p.is_demo = 0
+       ORDER BY p.published_at DESC
+       LIMIT ?`
+    )
+    .all(agentId, limit);
+  return rows.map(r => ({
+    id: String(r.id),
+    title: String(r.title),
+    body: String(r.body),
+    publishedAt: String(r.published_at),
+    canonicalUrl: r.canonical_source_url == null ? null : String(r.canonical_source_url),
+    titleHash: r.title_hash == null ? null : String(r.title_hash)
+  }));
+}
+
+export type PostLinkRelation = 'follow_up' | 'confirms' | 'updates' | 'contradicts' | 'related';
+
+export interface PostLinkRow {
+  id: string;
+  postId: string;
+  relatedPostId: string;
+  relationType: PostLinkRelation;
+  similarity: number | null;
+  reason: string | null;
+  createdAt: string;
+}
+
+export function insertPostLink(input: {
+  postId: string;
+  relatedPostId: string;
+  relationType: PostLinkRelation;
+  similarity: number | null;
+  reason: string | null;
+  nowMs: number;
+}): void {
+  getDb()
+    .prepare(
+      `INSERT OR IGNORE INTO post_links
+       (id, post_id, related_post_id, relation_type, similarity, reason, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      ulid(),
+      input.postId,
+      input.relatedPostId,
+      input.relationType,
+      input.similarity,
+      input.reason,
+      iso(input.nowMs)
+    );
+}
+
+export function getPostLinks(postId: string): PostLinkRow[] {
+  const rows = getDb()
+    .prepare(`SELECT * FROM post_links WHERE post_id = ? ORDER BY similarity DESC, created_at ASC`)
+    .all(postId);
+  return rows.map(r => ({
+    id: String(r.id),
+    postId: String(r.post_id),
+    relatedPostId: String(r.related_post_id),
+    relationType: String(r.relation_type) as PostLinkRelation,
+    similarity: r.similarity == null ? null : Number(r.similarity),
+    reason: r.reason == null ? null : String(r.reason),
+    createdAt: String(r.created_at)
+  }));
 }
