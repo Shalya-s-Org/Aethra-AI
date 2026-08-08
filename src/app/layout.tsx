@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { MotionConfig } from "framer-motion";
 import { AgentProvider } from "../context/AgentContext";
 
 export const metadata: Metadata = {
@@ -16,7 +17,9 @@ export default function RootLayout({
     <html lang="en" className="h-full antialiased dark">
       <body className="min-h-full flex flex-col bg-[#050816] text-white">
         <AgentProvider>
-          {children}
+          <MotionConfig reducedMotion="user">
+            {children}
+          </MotionConfig>
         </AgentProvider>
       </body>
     </html>

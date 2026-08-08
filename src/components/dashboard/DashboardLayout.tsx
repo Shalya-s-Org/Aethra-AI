@@ -11,7 +11,7 @@ interface DashboardLayoutProps {
 }
 
 export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
-  const { activeTab, setActiveTab, status, isInitialized, resetAgent, config } = useAgent();
+  const { activeTab, setActiveTab, status, isInitialized, resetAgent, config, hasLoadedSnapshot } = useAgent();
   const [timeString, setTimeString] = useState('');
 
   // Clock tick
@@ -132,7 +132,23 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
 
         {/* View Layout wrapper */}
         <main className="flex-1 overflow-y-auto p-8 relative">
-          {children}
+          {isInitialized && !hasLoadedSnapshot ? (
+            <div className="space-y-6" aria-busy="true" aria-label="Loading agent telemetry">
+              <div className="space-y-2">
+                <div className="h-6 w-56 rounded bg-white/5 animate-pulse" />
+                <div className="h-3 w-80 rounded bg-white/5 animate-pulse" />
+              </div>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="h-24 rounded-xl border border-white/5 bg-white/3 animate-pulse" />
+                ))}
+              </div>
+              <div className="h-64 rounded-xl border border-white/5 bg-white/3 animate-pulse" />
+              <div className="h-40 rounded-xl border border-white/5 bg-white/3 animate-pulse" />
+            </div>
+          ) : (
+            children
+          )}
         </main>
       </div>
     </div>

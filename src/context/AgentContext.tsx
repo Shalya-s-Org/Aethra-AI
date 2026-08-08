@@ -68,6 +68,9 @@ interface AgentContextType {
     reasoning: string;
     estimatedCompletionSeconds: number;
   };
+
+  // First live snapshot applied (dashboard can stop showing its skeleton)
+  hasLoadedSnapshot: boolean;
 }
 
 const AgentContext = createContext<AgentContextType | undefined>(undefined);
@@ -125,9 +128,13 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [lastDecisionTimeSeconds, setLastDecisionTimeSeconds] = useState<number>(0);
   const [autonomousTimelineLogs, setAutonomousTimelineLogs] = useState<Array<{ timestamp: string; message: string }>>([]);
   const [novaLiveFocus, setNovaLiveFocus] = useState(DEFAULT_FOCUS);
+  // True once the first live engine snapshot has been applied. Lets the
+  // dashboard show a skeleton instead of empty defaults while bootstrapping.
+  const [hasLoadedSnapshot, setHasLoadedSnapshot] = useState<boolean>(false);
 
   const initializeAgent = async (newConfig: AgentConfig) => {
     const previousId = agentId;
+    setHasLoadedSnapshot(false);
     try {
       const res = await fetch('/api/agent/init', {
         method: 'POST',
@@ -154,6 +161,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const resetAgent = useCallback(() => {
     const currentId = agentId;
+    setHasLoadedSnapshot(false);
     setIsInitialized(false);
     setAgentId("");
     setStatus('inactive');
@@ -224,6 +232,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setAutonomousTimelineLogs(data.autonomousTimelineLogs);
         setNovaLiveFocus(data.novaLiveFocus);
         setNextPublishSeconds(data.nextPublishSeconds);
+        setHasLoadedSnapshot(true);
       } catch {
         // Transient network error: keep the last good snapshot.
       }
@@ -271,7 +280,8 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       pipelineProgress,
       lastDecisionTimeSeconds,
       autonomousTimelineLogs,
-      novaLiveFocus
+      novaLiveFocus,
+      hasLoadedSnapshot
     }}>
       {children}
     </AgentContext.Provider>
