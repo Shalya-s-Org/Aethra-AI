@@ -2373,3 +2373,6 @@ Persist this design system to design-system/MASTER.md (and design-system/pages/d
 
 ## Prompt 18
 Add semantic color tokens (cyber-red destructive, running/queued/failed status tokens) to globals.css and replace the ad-hoc red/amber hex classes across the dashboard views.
+
+## Prompt 19
+Upgrade AnalyticsView with bullet charts for KPI-vs-target and accessibility fallbacks (visible text values, dashed line styles, pause/resume on the streaming area chart).
