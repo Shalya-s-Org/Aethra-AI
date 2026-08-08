@@ -2367,3 +2367,6 @@ Apply the VULN-002 fix: stop getOrCreateAgentState from fabricating agents (404 
 
 ## Prompt 16
 Fix the HIGH UX gaps
+
+## Prompt 17
+Persist this design system to design-system/MASTER.md (and design-system/pages/dashboard.md with the dashboard-specific overrides) for future sessions.
