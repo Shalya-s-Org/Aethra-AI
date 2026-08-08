@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getOrCreateAgentState } from '../../../../utils/agentEngine';
+import { getOrCreateAgentState, isSafeAgentId } from '../../../../utils/agentEngine';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -7,6 +7,9 @@ export async function GET(request: Request) {
 
   if (!agentId) {
     return NextResponse.json({ error: "Missing required query parameter: agentId" }, { status: 400 });
+  }
+  if (!isSafeAgentId(agentId)) {
+    return NextResponse.json({ error: "Invalid agentId." }, { status: 400 });
   }
 
   // Retrieve dynamic agent state from backend

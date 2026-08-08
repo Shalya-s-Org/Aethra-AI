@@ -23,7 +23,9 @@ const nextPublishResetSeconds = (frequency: string): number => {
 const getGlobalAgentsRegistry = (): Record<string, BackendAgentInstance> => {
   const g = globalThis as unknown as { agents?: Record<string, BackendAgentInstance> };
   if (!g.agents) {
-    g.agents = {};
+    // Null-prototype object: "__proto__" is a plain key, not a prototype
+    // setter, so attacker-controlled agentIds cannot pollute the registry.
+    g.agents = Object.create(null) as Record<string, BackendAgentInstance>;
   }
   return g.agents;
 };
@@ -994,6 +996,16 @@ function triggerAutonomousSequence(agentId: string) {
       activeAgent.memoryNodes.push(...newNodes);
     }
   }, elapsed);
+}
+
+// Validate an externally-supplied agentId (e.g. from a query string) before it
+// can become a registry key. Rejects the dangerous property names and anything
+// outside a conservative [a-zA-Z0-9-] shape, and caps the length.
+export function isSafeAgentId(agentId: string): boolean {
+  if (agentId.length === 0 || agentId.length > 128) return false;
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9-]*$/.test(agentId)) return false;
+  if (agentId === '__proto__' || agentId === 'constructor' || agentId === 'prototype') return false;
+  return true;
 }
 
 // Retrieve an agent's details, fall back to initializing a default one if missing

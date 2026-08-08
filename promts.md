@@ -2352,3 +2352,9 @@ now tell me if this is completely ready and as per problem statement or somethin
 
 ## Prompt 11
 /overhaul
+
+## Prompt 12
+/security-review
+
+## Prompt 13
+Apply the VULN-001 fix: create the agent registry with Object.create(null) (or a Map) so __proto__ keys can't pollute it, and validate agentId in the state/feed routes.
