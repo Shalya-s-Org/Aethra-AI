@@ -25,9 +25,11 @@ export const InitModal: React.FC<InitModalProps> = ({ isOpen, onClose }) => {
 
   const [isActivating, setIsActivating] = useState(false);
   const [activationStep, setActivationStep] = useState(0);
+  const [initError, setInitError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setInitError(null);
     setIsActivating(true);
 
     // Step-by-step activating states (initializeAgent performs the real
@@ -44,7 +46,16 @@ export const InitModal: React.FC<InitModalProps> = ({ isOpen, onClose }) => {
       setActivationStep(i + 1);
     }
 
-    initializeAgent(formData);
+    // Await the real init: on failure keep the modal open and show the
+    // backend's error instead of closing as if nothing happened.
+    const result = await initializeAgent(formData);
+    if (!result.ok) {
+      setInitError(result.error);
+      setActivationStep(0);
+      setIsActivating(false);
+      return;
+    }
+    setActivationStep(0);
     setIsActivating(false);
     onClose();
   };
@@ -68,6 +79,15 @@ export const InitModal: React.FC<InitModalProps> = ({ isOpen, onClose }) => {
 
             {!isActivating ? (
               <form onSubmit={handleSubmit} className="space-y-5">
+                {initError && (
+                  <div
+                    role="alert"
+                    className="flex items-start gap-2 border border-red-500/40 bg-red-500/10 rounded px-3 py-2.5 text-[11px] text-red-400 font-mono"
+                  >
+                    <span className="mt-0.5">⚠</span>
+                    <span>Initialization failed: {initError}</span>
+                  </div>
+                )}
                 <div className="flex items-center gap-3 border-b border-white/5 pb-4">
                   <div className="w-10 h-10 rounded-lg bg-cyber-cyan/10 flex items-center justify-center border border-cyber-cyan/30">
                     <Cpu className="w-5 h-5 text-cyber-cyan animate-pulse" />
