@@ -2761,3 +2761,6 @@ Requirements:
 - Produce a machine-readable summary and concise human report.
 - Fail the check if no scheduler is configured, persistence is local/ephemeral in production, or any judged API contract assertion fails.
 - Run all tests, lint, typecheck, and build.
+
+## Prompt 43
+my agent won't initialize, pls fix
