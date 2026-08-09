@@ -341,7 +341,15 @@ describe('routine interval and daily cap', () => {
       })
     );
 
-    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(8), routineIntervalMs: 0, dailyCap: 2 });
+    const run = await runEditorial({
+      agentId: AGENT_ID,
+      now: nowFor(8),
+      routineIntervalMs: 0,
+      dailyCap: 2,
+      // Isolate the daily cap: the feed-diversity rule (default 2/type/24h)
+      // would otherwise hold the third github-advisory candidate first.
+      diversityMaxPostsPerType: 10_000
+    });
     assert.equal(decisionOf(run, seeds[0].id).kind, 'accepted');
     assert.equal(decisionOf(run, seeds[1].id).kind, 'accepted');
     const dc = decisionOf(run, seeds[2].id);

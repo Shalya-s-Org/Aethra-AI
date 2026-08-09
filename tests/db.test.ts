@@ -51,7 +51,7 @@ describe('migrations', () => {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
       .all()
       .map(r => String(r.name));
-    for (const t of ['agents', 'topics', 'sources', 'posts', 'editorial_decisions', 'persona_memory', 'agent_runs', 'discovery_candidates', 'discovery_fetches', 'schema_migrations']) {
+    for (const t of ['agents', 'topics', 'sources', 'posts', 'editorial_decisions', 'persona_memory', 'agent_runs', 'discovery_candidates', 'discovery_fetches', 'source_health', 'schema_migrations']) {
       assert.ok(tables.includes(t), `missing table ${t}`);
     }
     // Reopen: migrations must not re-run or error.

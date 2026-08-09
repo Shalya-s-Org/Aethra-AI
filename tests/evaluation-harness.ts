@@ -138,6 +138,7 @@ export async function runEvaluationSim(opts: EvaluationSimOptions): Promise<Eval
             candidates,
             totalCandidates: candidates.length,
             newCandidates,
+            filtered: 0,
             fetches: [],
             failures: []
           };

@@ -7,8 +7,7 @@ import type {
   DiscoveryDecisionLite,
   EngineMeta,
   PipelineRun,
-  PipelineStage,
-  SourceHealthLite
+  PipelineStage
 } from './agentTypes';
 import {
   generateServerUUID,
@@ -21,7 +20,7 @@ import {
   getAgentRow,
   getDiscoveryCandidates,
   getDiscoveryDecisions,
-  getDiscoveryFetches,
+  getSourceHealth,
   getMemoryNodesByAgent,
   getPostLinks,
   getPostsByAgent,
@@ -36,7 +35,6 @@ import {
   insertPost,
   insertRun,
   insertSource,
-  listDueAgentIds,
   putAgentRow,
   updateRun,
   upsertTopicRow,
@@ -44,6 +42,8 @@ import {
 } from './db';
 import { DEFAULT_DAILY_CAP, DEFAULT_ROUTINE_INTERVAL_MS } from './editorial/engine';
 import { PUBLISH_THRESHOLD, REJECT_THRESHOLD } from './editorial/types';
+import { computeSourceStatus } from './discovery/health';
+import { sourceTypeRank } from './discovery/sourceTypes';
 import { ulid } from './ids';
 import { linkRelatedPosts, recordMemoryForAccepted } from './memory';
 import { getPersona, validatePost } from './persona';
@@ -728,36 +728,34 @@ export function peekAgentState(agentId: string, now: number = Date.now()): Backe
     };
   });
 
-  // --- Source health: aggregated from the durable discovery_fetches table ---
-  const fetches = getDiscoveryFetches({ limit: 200 });
-  const bySource = new Map<string, SourceHealthLite>();
-  for (const f of fetches) {
-    let agg = bySource.get(f.sourceName);
-    if (!agg) {
-      agg = {
-        sourceName: f.sourceName,
-        sourceType: f.sourceType,
-        url: f.url,
-        status: f.status,
-        itemCount: f.itemCount,
-        error: f.error,
-        fetchedAt: f.fetchedAt,
-        successCount: 0,
-        failureCount: 0,
-        lastSuccessAt: null,
-        lastFailureAt: null
+  // --- Source health: the durable source_health table (one rolling row per
+  //     source, updated by the discovery runner), with derived freshness ---
+  const healthRows = getSourceHealth();
+  state.sourceHealth = healthRows
+    .map(h => {
+      const freshness = computeSourceStatus(h, now);
+      return {
+        sourceName: h.sourceName,
+        sourceType: h.sourceType,
+        url: h.url,
+        status: (freshness === 'down' ? 'failure' : 'success') as 'success' | 'failure',
+        freshness,
+        itemCount: h.lastItemCount,
+        error: h.lastError,
+        fetchedAt: h.lastFetchAt,
+        successCount: h.successCount,
+        failureCount: h.failureCount,
+        lastSuccessAt: h.lastSuccessAt,
+        lastFailureAt: h.lastFailureAt,
+        consecutiveFailures: h.consecutiveFailures
       };
-      bySource.set(f.sourceName, agg);
-    }
-    if (f.status === 'success') {
-      agg.successCount += 1;
-      if (agg.lastSuccessAt == null) agg.lastSuccessAt = f.fetchedAt;
-    } else {
-      agg.failureCount += 1;
-      if (agg.lastFailureAt == null) agg.lastFailureAt = f.fetchedAt;
-    }
-  }
-  state.sourceHealth = [...bySource.values()].sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt));
+    })
+    .sort((a, b) => {
+      // Primary sources first, then most-recently updated.
+      const rankDiff = sourceTypeRank(b.sourceType) - sourceTypeRank(a.sourceType);
+      if (rankDiff !== 0) return rankDiff;
+      return (b.fetchedAt ?? '').localeCompare(a.fetchedAt ?? '');
+    });
 
   // --- Agent run history + the durable scheduled job ---
   state.agentRuns = getRunsByAgent(agentId)

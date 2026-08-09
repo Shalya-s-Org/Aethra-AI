@@ -10,7 +10,9 @@
     "test": "tsx --test tests/*.test.ts",
     "discover": "tsx scripts/discover.ts",
     "worker": "tsx scripts/worker.ts",
-    "evaluate": "tsx scripts/evaluate.ts"
+    "evaluate": "tsx scripts/evaluate.ts",
+    "generate-fixtures": "tsx scripts/generate-replay-fixtures.ts",
+    "record-fixtures": "tsx scripts/record-discovery-fixtures.ts"
   },
   "dependencies": {
     "clsx": "^2.1.1",

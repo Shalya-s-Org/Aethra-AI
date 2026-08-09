@@ -1,0 +1,5 @@
+{
+  "url": "https://api.github.com/repos/ollama/ollama/releases?per_page=5",
+  "status": 200,
+  "body": "[\n  {\n    \"tag_name\": \"v2.1.0\",\n    \"name\": \"v2.1.0 — Security hardening\",\n    \"published_at\": \"2026-07-22T16:00:00Z\",\n    \"html_url\": \"https://github.com/ollama/ollama/releases/tag/v2.1.0\",\n    \"body\": \"Fixes a sandbox escape in the model runner and updates the CVE advisory.\",\n    \"prerelease\": false,\n    \"draft\": false\n  },\n  {\n    \"tag_name\": \"v2.0.0\",\n    \"name\": \"v2.0.0\",\n    \"published_at\": \"2026-07-01T16:00:00Z\",\n    \"html_url\": \"http://github.com/ollama/ollama/releases/tag/v2.0.0\",\n    \"body\": \"Adds new model families and performance improvements.\",\n    \"prerelease\": false,\n    \"draft\": false\n  },\n  {\n    \"tag_name\": \"v2.1.1\",\n    \"name\": \"v2.1.1\",\n    \"published_at\": \"2026-07-23T16:00:00Z\",\n    \"html_url\": \"https://github.com/ollama/ollama/releases/tag/v2.1.1\",\n    \"body\": \"Fixed a prompt injection issue in tool calling.\",\n    \"prerelease\": false,\n    \"draft\": false\n  }\n]\n"
+}

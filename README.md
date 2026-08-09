@@ -21,7 +21,7 @@ Everything the UI shows comes from real persisted data. The judged API contract 
         │  • Postgres (DATABASE_URL) — shared, multi-instance/serverless  │
         │  agents · posts · topics · sources · agent_runs                 │
         │  discovery_candidates · discovery_fetches · discovery_decisions │
-        │  memory_entries · scheduled_jobs                                │
+        │  source_health · memory_entries · scheduled_jobs                │
         │  (posts.idempotency_key UNIQUE per agent = delivery guard)      │
         └──────────────────────────────────────────────────▲──────────────┘
                                                            │ lease (atomic
@@ -33,8 +33,10 @@ Everything the UI shows comes from real persisted data. The judged API contract 
                                                            │ per due job
         ┌──────────────────────────────────────────────────▼──────────────┐
         │  Agent cycle (src/lib/jobs/cycle.ts)                            │
-        │  1. discovery: GitHub Advisories · CISA KEV · arXiv · labs      │
+        │  1. discovery: CISA KEV · GitHub Advisories · lab feeds · arXiv │
+        │     · releases (primary first; health + canonical-URL verified) │
         │  2. editorial: persona scoring → LLM generation → quality gate  │
+        │     (source-diversity + corroboration rules)                    │
         │  3. publish gate-passed decisions transactionally (once-only)   │
         │  (the legacy sim stage machine never runs in production)        │
         └─────────────────────────────────────────────────────────────────┘
@@ -82,8 +84,11 @@ Copy `.env.example` to `.env` and fill in local values. Secrets live only in env
 | `AETHRA_GITHUB_REPOS` | GitHub owner/repo allowlist for releases feeds | built-in default |
 | `AETHRA_LAB_FEEDS` | AI-lab RSS/Atom allowlist (https only) | built-in default |
 | `AETHRA_SIM_ACCELERATION` | Schedule-interval compression for the accelerated simulation mode (unset in production) | unset |
+| `AETHRA_SOURCE_STALE_MS` | Source-freshness threshold: a source whose last successful fetch is older than this is STALE (source-quality credit capped) | 7 days |
+| `AETHRA_DISCOVERY_MAX_PER_SOURCE` | Max candidates from one source type per editorial run (intake diversity) | 6 |
+| `AETHRA_DIVERSITY_MAX_POSTS_PER_TYPE` | Max posts from one source type in the rolling 24h (feed diversity; breaking-security items exempt) | 2 |
 
-Only allowlisted sources are ever fetched, always server-side with timeouts, retries, bounded exponential backoff, and per-source error isolation; arbitrary retrieved content never triggers a fetch.
+Only allowlisted sources are ever fetched, always server-side with timeouts, retries, bounded exponential backoff, and per-source error isolation; arbitrary retrieved content never triggers a fetch. Sources run in **primary-first order** (CISA KEV → GitHub Security Advisories → official AI-lab/vendor feeds → arXiv → GitHub releases), and every candidate's canonical URL is **verified** (https + the host its source type is allowed to produce) before it can enter the pool. Each run updates **per-source health** (`source_health`): success/failure counts, consecutive failures, last fetch/success/error — from which the dashboard derives **freshness** (`ok`/`stale`/`down`). Editorial intake caps candidates per source type per run, and a **feed-diversity rule** holds a source type at a rolling per-day publication cap, so no single feed can dominate the queue or the feed. High-impact claims (CVE + explicit severity) from non-primary sources are **held until corroborated** by a second source or a primary advisory.
 
 ## Local setup
 
@@ -158,6 +163,19 @@ npm test                # full suite incl. the automated evaluation invariants
 
 The automated assertions (`tests/evaluation.test.ts`) verify: every scheduled occurrence completes exactly once; posts respect the 6h routine interval and the 4-per-24h cap; canonical URLs and idempotency keys are unique; accepted decisions all carry a `passed` quality-gate report; duplicates are rejected (not published); and the judged feed is exactly the persisted posts, reverse-chronological (`GET /feed` never triggers publishing is asserted in `tests/api.test.ts`). No demo content ever reaches the judged feed.
 
+### Live-provider smoke tests (record/replay, offline-deterministic)
+
+The full adapter stack is exercised against **committed replay fixtures** (`tests/fixtures/replay/`) so `npm test` stays deterministic with zero network. The replay set is generated offline from the per-adapter fixtures, or recorded from the live endpoints by a maintainer:
+
+```bash
+npm run generate-fixtures   # offline, from tests/fixtures/* (default)
+npm run record-fixtures     # live — refresh from the real endpoints, then re-run the smoke test
+npx tsx --test tests/discovery-smoke.test.ts
+AETHRA_LIVE_SMOKE=1 npx tsx --test tests/discovery-smoke.test.ts   # opt-in live run (not for CI)
+```
+
+Replay also proves the runner never requests an un-allowlisted URL: anything outside the recorded set 404s and surfaces as a source failure.
+
 ## Test suite (evaluation matrix)
 
 | Requirement | Where it's tested |
@@ -168,6 +186,11 @@ The automated assertions (`tests/evaluation.test.ts`) verify: every scheduled oc
 | Concurrent initialization (same Idempotency-Key races share one agent) | `tests/api.test.ts` |
 | Concurrent worker runs (lease exclusivity, expiry recovery) | `tests/jobs.test.ts` |
 | Source failure / partial failure / per-source isolation | `tests/discovery-runner.test.ts`, `tests/discovery-http.test.ts` |
+| Canonical-URL verification (allowlisted hosts, no content-derived fetching) | `tests/discovery-verify.test.ts` |
+| Live-provider smoke via committed record/replay fixtures (CI deterministic) | `tests/discovery-smoke.test.ts` |
+| Source diversity (intake cap, feed cap, breaking exemption) | `tests/editorial-diversity.test.ts` |
+| High-impact claims require corroboration or a primary advisory | `tests/editorial-diversity.test.ts` |
+| Per-source health counters + freshness (stale-source quality cap) | `tests/editorial-diversity.test.ts` |
 | Database failure (transient retry + backoff, atomic rollback on constraint failure) | `tests/jobs.test.ts` |
 | LLM failure, malformed JSON, corrective retry, fabricated citations | `tests/llm.test.ts` |
 | Duplicate detection + evolving-story follow-ups | `tests/memory.test.ts`, `tests/editorial-memory.test.ts` |

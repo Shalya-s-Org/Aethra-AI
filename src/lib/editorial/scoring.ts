@@ -12,6 +12,7 @@
 import type { Persona } from '../persona';
 import { getPersona } from '../persona';
 import type { RelevantMemory } from '../memory/memory';
+import { discussionBase, sourceQualityBase } from '../discovery/sourceTypes';
 import type { EditorialFlags, ScoreComponents, ScoredCandidate, ScorableCandidate } from './types';
 
 // ---------------------------------------------------------------------------
@@ -22,21 +23,8 @@ export const FRESH_MS = 48 * 3600_000; // full recency credit for ≤ 48h
 export const STALE_MS = 30 * 24 * 3600_000; // older than 30 days → stale
 export const BREAKING_FRESH_MS = 7 * 24 * 3600_000; // override requires ≤ 7 days
 
-const SOURCE_QUALITY_BASE: Record<string, number> = {
-  'cisa-kev': 12,
-  'github-advisory': 11,
-  'lab-feed': 10,
-  arxiv: 9,
-  'github-release': 7
-};
-
-const DISCUSSION_BASE: Record<string, number> = {
-  arxiv: 6,
-  'lab-feed': 5,
-  'github-advisory': 4,
-  'cisa-kev': 4,
-  'github-release': 3
-};
+/** Source-quality credit lost when the candidate's source is stale/down. */
+export const STALE_SOURCE_QUALITY_CAP = 10;
 
 const STOPWORDS = new Set([
   'the', 'a', 'an', 'of', 'for', 'in', 'on', 'with', 'and', 'or', 'to', 'via', 'at', 'by',
@@ -49,6 +37,14 @@ const STOPWORDS = new Set([
 
 export function textOf(candidate: ScorableCandidate): string {
   return `${candidate.title} ${candidate.summary ?? ''}`;
+}
+
+/** The widest identifier view: prose + canonical URL + raw record. Identifiers
+ *  (CVE/GHSA/arXiv id) legitimately live in any of these (e.g. a KEV entry's
+ *  CVE is only in its NVD URL / cveID field), so every identifier check and
+ *  the batch corroboration scan use this. */
+export function candidateIdentifierText(candidate: ScorableCandidate): string {
+  return `${textOf(candidate)} ${candidate.canonicalUrl} ${candidate.rawEvidence}`;
 }
 
 export function extractCve(text: string): string | null {
@@ -124,6 +120,9 @@ export interface ScoringContext {
   memory?: RelevantMemory;
   /** The persona driving relevance/rejection (defaults to Ada). */
   persona?: Persona;
+  /** Source NAMES whose persisted health is not ok (stale/down) — caps the
+   *  source-quality credit those candidates can earn. */
+  staleSources?: ReadonlySet<string>;
 }
 
 export function scoreCandidate(candidate: ScorableCandidate, ctx: ScoringContext): ScoredCandidate {
@@ -134,10 +133,7 @@ export function scoreCandidate(candidate: ScorableCandidate, ctx: ScoringContext
   const raw = candidate.rawEvidence;
   const summary = candidate.summary ?? '';
   const summaryLen = summary.length;
-  // Identifiers (CVE/GHSA/arXiv id) legitimately live in the canonical URL or
-  // raw record (e.g. a KEV entry's CVE is only in its NVD URL / cveID field),
-  // so identifier detection scans the widest view, never just the prose.
-  const identifierText = `${text} ${candidate.canonicalUrl} ${raw}`;
+  const identifierText = candidateIdentifierText(candidate);
 
   // persona relevance (/20) — driven by the persona's vocabulary.
   const secHits = countTermHits(text, vocab.securityTerms);
@@ -159,12 +155,15 @@ export function scoreCandidate(candidate: ScorableCandidate, ctx: ScoringContext
       Math.min(4, Math.floor(summaryLen / 300))
   );
 
-  // source quality / corroboration (/15)
+  // source quality / corroboration (/15). A candidate from a source whose
+  // health is not ok (stale or down) earns less quality credit — its claims
+  // can't be trusted as current.
   const cve = extractCve(identifierText);
+  const sourceIsStale = ctx.staleSources?.has(candidate.sourceName) ?? false;
   const sourceQuality = Math.min(
     15,
-    (SOURCE_QUALITY_BASE[candidate.sourceType] ?? 8) +
-      (cve && ctx.corroborationCves.has(cve) ? 3 : 0)
+    sourceQualityBase(candidate.sourceType) + (cve && ctx.corroborationCves.has(cve) ? 3 : 0),
+    sourceIsStale ? STALE_SOURCE_QUALITY_CAP : 15
   );
 
   // recency (/15)
@@ -183,7 +182,7 @@ export function scoreCandidate(candidate: ScorableCandidate, ctx: ScoringContext
   // discussion value (/10)
   const discussionValue = Math.min(
     10,
-    (DISCUSSION_BASE[candidate.sourceType] ?? 4) +
+    discussionBase(candidate.sourceType) +
       Math.min(3, countTermHits(text, vocab.discussionTerms)) +
       (summaryLen >= 300 ? 2 : 0)
   );
@@ -214,8 +213,23 @@ export function scoreCandidate(candidate: ScorableCandidate, ctx: ScoringContext
   const offPersona =
     avoidHits >= 2 || (avoidHits >= 1 && secHits === 0 && aiHits === 0) || personaRelevance === 0;
 
+  // High-impact claims (CVE + explicit critical/high severity) from a
+  // NON-primary source (arXiv, release notes, an unverifiable feed) need
+  // corroboration — either the same CVE appears in ≥ 2 batch candidates or a
+  // primary advisory carries it. Without that, the claim is held, never
+  // published on a single secondary source's say-so.
+  const highImpact = hasCve(identifierText) && hasSeverityField(raw);
+  // Primary advisories carry their own authority: a CISA KEV entry, or a
+  // GitHub-advisory / official lab-feed item with an explicit severity field.
+  const primaryAdvisory =
+    candidate.sourceType === 'cisa-kev' ||
+    ((candidate.sourceType === 'github-advisory' || candidate.sourceType === 'lab-feed') &&
+      hasSeverityField(raw));
+  const corroborated = cve != null && ctx.corroborationCves.has(cve);
+
   const flags: EditorialFlags = {
     stale: ageMs > STALE_MS,
+    staleSource: sourceIsStale,
     marketing: marketingHits >= 2 || (marketingHits >= 1 && techHits === 0 && idCount === 0),
     unsupported: idCount === 0 && techHits <= 1 && summaryLen < 150,
     offPersona: offPersona ? matchedAvoidTerm(text, vocab.avoidTerms) : undefined,
@@ -223,7 +237,8 @@ export function scoreCandidate(candidate: ScorableCandidate, ctx: ScoringContext
       ageMs <= BREAKING_FRESH_MS &&
       idCount >= 1 &&
       (candidate.sourceType === 'cisa-kev' ||
-        (candidate.sourceType === 'github-advisory' && hasSeverityField(raw)))
+        (candidate.sourceType === 'github-advisory' && hasSeverityField(raw))),
+    unverifiedImpact: highImpact && !primaryAdvisory && !corroborated ? (cve ?? undefined) : undefined
   };
 
   // Durable-memory duplicate ladder (levels 1/2/4 = duplicate; level 3 =

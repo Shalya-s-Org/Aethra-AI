@@ -692,5 +692,74 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_discovery_decisions_agent_decision
         ON discovery_decisions (agent_id, decision);
     `
+  },
+  {
+    id: '011_source_health',
+    // Per-source health, updated by the discovery runner after every run.
+    // One row per source NAME (the dashboard's health unit); the rolling
+    // discovery_fetches table keeps per-URL detail. Freshness status
+    // (ok/stale/down) is derived at read time from last_success_at and
+    // consecutive_failures (see src/lib/discovery/health.ts).
+    sqlite: `
+      CREATE TABLE source_health (
+        source_name          TEXT PRIMARY KEY,
+        source_type          TEXT NOT NULL,
+        url                  TEXT NOT NULL,
+        last_fetch_at        TEXT,
+        last_success_at      TEXT,
+        last_failure_at      TEXT,
+        last_error           TEXT,
+        last_item_count      INTEGER,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        success_count        INTEGER NOT NULL DEFAULT 0,
+        failure_count        INTEGER NOT NULL DEFAULT 0,
+        updated_at           TEXT NOT NULL
+      );
+
+      -- Backfill per-source health from the REAL fetch history (derived from
+      -- recorded discovery_fetches rows, never fabricated). The runner keeps
+      -- the table current from the next discovery run onward; on a fresh DB
+      -- discovery_fetches is empty and this is a no-op.
+      INSERT INTO source_health
+        (source_name, source_type, url, last_fetch_at, last_success_at, last_failure_at,
+         last_error, last_item_count, consecutive_failures, success_count, failure_count, updated_at)
+      SELECT
+        f1.source_name,
+        f1.source_type,
+        (SELECT url FROM discovery_fetches f2
+          WHERE f2.source_name = f1.source_name ORDER BY f2.fetched_at DESC LIMIT 1),
+        MAX(f1.fetched_at),
+        (SELECT MAX(f3.fetched_at) FROM discovery_fetches f3
+          WHERE f3.source_name = f1.source_name AND f3.status = 'success'),
+        (SELECT MAX(f4.fetched_at) FROM discovery_fetches f4
+          WHERE f4.source_name = f1.source_name AND f4.status = 'failure'),
+        (SELECT f5.error FROM discovery_fetches f5
+          WHERE f5.source_name = f1.source_name AND f5.status = 'failure'
+          ORDER BY f5.fetched_at DESC LIMIT 1),
+        (SELECT f6.item_count FROM discovery_fetches f6
+          WHERE f6.source_name = f1.source_name ORDER BY f6.fetched_at DESC LIMIT 1),
+        0,
+        SUM(CASE WHEN f1.status = 'success' THEN 1 ELSE 0 END),
+        SUM(CASE WHEN f1.status = 'failure' THEN 1 ELSE 0 END),
+        MAX(f1.fetched_at)
+      FROM discovery_fetches f1
+      GROUP BY f1.source_name;
+    `,
+    postgres: `
+      CREATE TABLE source_health (
+        source_name          TEXT PRIMARY KEY,
+        source_type          TEXT NOT NULL,
+        url                  TEXT NOT NULL,
+        last_fetch_at        TEXT,
+        last_success_at      TEXT,
+        last_failure_at      TEXT,
+        last_error           TEXT,
+        last_item_count      INTEGER,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        success_count        INTEGER NOT NULL DEFAULT 0,
+        failure_count        INTEGER NOT NULL DEFAULT 0,
+        updated_at           TEXT NOT NULL
+      );
+    `
   }
 ];

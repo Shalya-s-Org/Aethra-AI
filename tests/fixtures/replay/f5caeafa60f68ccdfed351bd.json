@@ -1,0 +1,5 @@
+{
+  "url": "https://security.googleblog.com/feeds/posts/default",
+  "status": 200,
+  "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<rss version=\"2.0\">\n  <channel>\n    <title>Google Online Security Blog</title>\n    <link>https://security.googleblog.com/</link>\n    <description>Security research and announcements</description>\n    <item>\n      <title>New research: practical attacks on LLM tool orchestration</title>\n      <link>https://security.googleblog.com/2026/07/llm-tool-orchestration-attacks.html</link>\n      <description>Google security researchers detail practical prompt-injection attacks against LLM tool orchestration and mitigations.</description>\n      <pubDate>Tue, 21 Jul 2026 09:00:00 GMT</pubDate>\n    </item>\n  </channel>\n</rss>"
+}

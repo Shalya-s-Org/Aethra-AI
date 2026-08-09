@@ -1,0 +1,5 @@
+{
+  "url": "https://api.github.com/repos/langchain-ai/langchain/releases?per_page=5",
+  "status": 200,
+  "body": "[{\"tag_name\":\"v0.3.500\",\"name\":\"v0.3.500 — Security release\",\"published_at\":\"2026-07-22T16:00:00Z\",\"html_url\":\"https://github.com/langchain-ai/langchain/releases/tag/v0.3.500\",\"body\":\"Patched a prompt-injection vector in tool-calling (GHSA-lc-500).\",\"prerelease\":false,\"draft\":false}]"
+}

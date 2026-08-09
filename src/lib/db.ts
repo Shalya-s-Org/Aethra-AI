@@ -847,6 +847,128 @@ export function getDiscoveryFetches(options: { limit?: number } = {}): Discovery
 }
 
 // ---------------------------------------------------------------------------
+// Source health (source_health) — one rolling row per source NAME
+// ---------------------------------------------------------------------------
+
+export interface SourceHealthRow {
+  sourceName: string;
+  sourceType: string;
+  url: string;
+  lastFetchAt: string | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastError: string | null;
+  lastItemCount: number | null;
+  consecutiveFailures: number;
+  successCount: number;
+  failureCount: number;
+  updatedAt: string;
+}
+
+export interface SourceHealthUpdate {
+  sourceName: string;
+  sourceType: string;
+  url: string;
+  /** True when at least one fetch for this source succeeded this run. */
+  succeeded: boolean;
+  /** Errors from this run's failed fetches (kept when nothing succeeded). */
+  error: string | null;
+  /** Total items across successful fetches this run. */
+  itemCount: number;
+  updatedAtMs: number;
+}
+
+/** Upsert one source's rolling health after a discovery run. */
+export function upsertSourceHealth(input: SourceHealthUpdate): void {
+  const at = iso(input.updatedAtMs);
+  const existing = getDb()
+    .prepare(`SELECT * FROM source_health WHERE source_name = ?`)
+    .get(input.sourceName) as Record<string, unknown> | undefined;
+
+  const successCount = existing ? Number(existing.success_count) : 0;
+  const failureCount = existing ? Number(existing.failure_count) : 0;
+  const consecutive = input.succeeded ? 0 : (existing ? Number(existing.consecutive_failures) : 0) + 1;
+
+  getDb()
+    .prepare(
+      `INSERT INTO source_health
+         (source_name, source_type, url, last_fetch_at, last_success_at, last_failure_at,
+          last_error, last_item_count, consecutive_failures, success_count, failure_count, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(source_name) DO UPDATE SET
+         source_type = excluded.source_type,
+         url = excluded.url,
+         last_fetch_at = excluded.last_fetch_at,
+         last_success_at = COALESCE(excluded.last_success_at, source_health.last_success_at),
+         last_failure_at = COALESCE(excluded.last_failure_at, source_health.last_failure_at),
+         last_error = excluded.last_error,
+         last_item_count = excluded.last_item_count,
+         consecutive_failures = excluded.consecutive_failures,
+         success_count = excluded.success_count,
+         failure_count = excluded.failure_count,
+         updated_at = excluded.updated_at`
+    )
+    .run(
+      input.sourceName,
+      input.sourceType,
+      input.url,
+      at,
+      input.succeeded ? at : null,
+      input.succeeded ? null : at,
+      input.succeeded ? null : input.error,
+      input.succeeded ? input.itemCount : null,
+      consecutive,
+      successCount + (input.succeeded ? 1 : 0),
+      failureCount + (input.succeeded ? 0 : 1),
+      at
+    );
+}
+
+export function getSourceHealth(): SourceHealthRow[] {
+  return getDb()
+    .prepare(
+      `SELECT source_name, source_type, url, last_fetch_at, last_success_at, last_failure_at,
+              last_error, last_item_count, consecutive_failures, success_count, failure_count, updated_at
+       FROM source_health ORDER BY source_name`
+    )
+    .all()
+    .map(r => ({
+      sourceName: String(r.source_name),
+      sourceType: String(r.source_type),
+      url: String(r.url),
+      lastFetchAt: r.last_fetch_at == null ? null : String(r.last_fetch_at),
+      lastSuccessAt: r.last_success_at == null ? null : String(r.last_success_at),
+      lastFailureAt: r.last_failure_at == null ? null : String(r.last_failure_at),
+      lastError: r.last_error == null ? null : String(r.last_error),
+      lastItemCount: r.last_item_count == null ? null : Number(r.last_item_count),
+      consecutiveFailures: Number(r.consecutive_failures),
+      successCount: Number(r.success_count),
+      failureCount: Number(r.failure_count),
+      updatedAt: String(r.updated_at)
+    }));
+}
+
+/** Posts published (non-demo) in the last `sinceMs` whose underlying discovery
+ *  candidate came from the given source type — the feed-diversity counter.
+ *  Joins posts → editorial_decisions (published_post_id) → discovery_candidates. */
+export function countPublishedBySourceType(
+  agentId: string,
+  sourceType: string,
+  sinceMs: number
+): number {
+  const row = getDb()
+    .prepare(
+      `SELECT COUNT(*) AS n
+       FROM posts p
+       JOIN discovery_decisions d ON d.published_post_id = p.id
+       JOIN discovery_candidates c ON c.id = d.candidate_id
+       WHERE p.agent_id = ? AND p.is_demo = 0 AND c.source_type = ? AND p.published_at >= ?`
+    )
+    .get(agentId, sourceType, iso(sinceMs)) as { n: number };
+  return Number(row.n);
+}
+
+// ---------------------------------------------------------------------------
 // Editorial decisions (discovery_decisions)
 // ---------------------------------------------------------------------------
 
