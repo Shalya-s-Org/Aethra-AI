@@ -1221,6 +1221,10 @@ export interface DiscoveryDecisionRow {
   candidateId: string;
   /** Candidate headline (joined from discovery_candidates). */
   title: string;
+  /** Candidate canonical URL + source (joined from discovery_candidates). */
+  candidateUrl: string | null;
+  sourceName: string | null;
+  sourceType: string | null;
   decision: EditorialDecisionKind;
   totalScore: number;
   personaRelevance: number;
@@ -1416,7 +1420,8 @@ export function hasPublishedCanonicalUrl(url: string): boolean {
 export function getDiscoveryDecisions(options: { limit?: number; decision?: EditorialDecisionKind } = {}): DiscoveryDecisionRow[] {
   const limit = Math.min(500, options.limit ?? 100);
   let sql =
-    `SELECT dd.id, dd.candidate_id, dc.title, dd.decision, dd.total_score, dd.persona_relevance,
+    `SELECT dd.id, dd.candidate_id, dc.title, dc.canonical_url, dc.source_name, dc.source_type,
+            dd.decision, dd.total_score, dd.persona_relevance,
             dd.technical_impact, dd.source_quality, dd.recency, dd.novelty, dd.discussion_value,
             dd.evidence_confidence, dd.explanation, dd.decided_at, dd.generated_json,
             dd.generation_status, dd.generation_failure, dd.quality_json, dd.quality_status,
@@ -1437,6 +1442,9 @@ export function getDiscoveryDecisions(options: { limit?: number; decision?: Edit
       id: String(r.id),
       candidateId: String(r.candidate_id),
       title: String(r.title),
+      candidateUrl: r.canonical_url == null ? null : String(r.canonical_url),
+      sourceName: r.source_name == null ? null : String(r.source_name),
+      sourceType: r.source_type == null ? null : String(r.source_type),
       decision: String(r.decision) as EditorialDecisionKind,
       totalScore: Number(r.total_score),
       personaRelevance: Number(r.persona_relevance),

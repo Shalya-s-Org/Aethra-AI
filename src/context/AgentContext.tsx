@@ -2,7 +2,17 @@
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import type { Topic, Post, MemoryNode } from '../data/mockTopics';
-import type { BackendAgentInstance, DiscoveryDecisionLite } from '../lib/agentTypes';
+import type {
+  AgentRunLite,
+  BackendAgentInstance,
+  CandidateQueueLite,
+  DiscoveryDecisionLite,
+  EditorialThresholdsLite,
+  MemoryEntryLite,
+  PublishedPostLite,
+  ScheduledJobLite,
+  SourceHealthLite
+} from '../lib/agentTypes';
 
 export type AgentStatus = 'inactive' | 'idle' | 'scanning' | 'filtering' | 'reasoning' | 'memory_check' | 'writing' | 'publishing' | 'learning';
 
@@ -52,6 +62,15 @@ interface AgentContextType {
   /** Discovery-pipeline editorial decisions with quality-gate results. */
   discoveryDecisions: DiscoveryDecisionLite[];
   rejectedTodayList: Array<{ title: string; reason: string }>;
+
+  // Real persisted-pipeline data (SQLite) — rendered as-is, never synthesized.
+  sourceHealth: SourceHealthLite[];
+  candidateQueue: CandidateQueueLite[];
+  agentRuns: AgentRunLite[];
+  scheduledJob: ScheduledJobLite | null;
+  memoryEntries: MemoryEntryLite[];
+  publishedPosts: PublishedPostLite[];
+  editorialThresholds: EditorialThresholdsLite;
 
   // Navigation
   activeTab: string;
@@ -123,6 +142,18 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [decisions, setDecisions] = useState<Topic[]>([]);
   const [discoveryDecisions, setDiscoveryDecisions] = useState<DiscoveryDecisionLite[]>([]);
   const [rejectedTodayList, setRejectedTodayList] = useState<Array<{ title: string; reason: string }>>([]);
+  const [sourceHealth, setSourceHealth] = useState<SourceHealthLite[]>([]);
+  const [candidateQueue, setCandidateQueue] = useState<CandidateQueueLite[]>([]);
+  const [agentRuns, setAgentRuns] = useState<AgentRunLite[]>([]);
+  const [scheduledJob, setScheduledJob] = useState<ScheduledJobLite | null>(null);
+  const [memoryEntries, setMemoryEntries] = useState<MemoryEntryLite[]>([]);
+  const [publishedPosts, setPublishedPosts] = useState<PublishedPostLite[]>([]);
+  const [editorialThresholds, setEditorialThresholds] = useState<EditorialThresholdsLite>({
+    publish: 78,
+    reject: 60,
+    dailyCap: 4,
+    routineIntervalMinutes: 360
+  });
 
   const [activeTab, setActiveTab] = useState<string>("dashboard");
   const [activeTopic, setActiveTopic] = useState<Topic | null>(null);
@@ -180,6 +211,12 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setMemoryNodes([]);
     setDecisions([]);
     setRejectedTodayList([]);
+    setSourceHealth([]);
+    setCandidateQueue([]);
+    setAgentRuns([]);
+    setScheduledJob(null);
+    setMemoryEntries([]);
+    setPublishedPosts([]);
     setActiveTopic(null);
     setPipelineProgress(0);
     setLastDecisionTimeSeconds(0);
@@ -230,6 +267,13 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setDecisions(data.decisions);
         setDiscoveryDecisions(data.discoveryDecisions ?? []);
         setRejectedTodayList(data.rejectedTodayList);
+        setSourceHealth(data.sourceHealth ?? []);
+        setCandidateQueue(data.candidateQueue ?? []);
+        setAgentRuns(data.agentRuns ?? []);
+        setScheduledJob(data.scheduledJob ?? null);
+        setMemoryEntries(data.memoryEntries ?? []);
+        setPublishedPosts(data.publishedPosts ?? []);
+        if (data.editorialThresholds) setEditorialThresholds(data.editorialThresholds);
         setActiveTopic(data.activeTopic);
         setPipelineProgress(data.pipelineProgress);
         setLastDecisionTimeSeconds(data.lastDecisionTimeSeconds);
@@ -279,6 +323,13 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       decisions,
       discoveryDecisions,
       rejectedTodayList,
+      sourceHealth,
+      candidateQueue,
+      agentRuns,
+      scheduledJob,
+      memoryEntries,
+      publishedPosts,
+      editorialThresholds,
       activeTab,
       setActiveTab,
       activeTopic,

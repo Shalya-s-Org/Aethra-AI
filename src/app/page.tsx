@@ -10,6 +10,8 @@ import { FeedView } from "../components/dashboard/FeedView";
 import { MemoryEngine } from "../components/dashboard/MemoryEngine";
 import { EditorialDecisions } from "../components/dashboard/EditorialDecisions";
 import { DiscoveryQueue } from "../components/dashboard/DiscoveryQueue";
+import { SourceHealthView } from "../components/dashboard/SourceHealthView";
+import { RunHistoryView } from "../components/dashboard/RunHistoryView";
 import { AnalyticsView } from "../components/dashboard/AnalyticsView";
 import { SettingsView } from "../components/dashboard/SettingsView";
 
@@ -35,6 +37,8 @@ export default function Home() {
       {activeTab === 'memory' && <MemoryEngine />}
       {activeTab === 'decisions' && <EditorialDecisions />}
       {activeTab === 'queue' && <DiscoveryQueue />}
+      {activeTab === 'sources' && <SourceHealthView />}
+      {activeTab === 'runs' && <RunHistoryView />}
       {activeTab === 'analytics' && <AnalyticsView />}
       {activeTab === 'settings' && <SettingsView />}
     </DashboardLayout>

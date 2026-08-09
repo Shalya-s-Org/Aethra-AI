@@ -4,76 +4,167 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { useAgent } from '../../context/AgentContext';
 import { GlassCard } from '../ui/GlassCard';
 import { PipelineVisualizer } from './PipelineVisualizer';
-import { 
-  Search, Filter, Cpu, Database, Award, ShieldAlert, 
-  TrendingUp, Clock, FileText, ChevronRight, Zap, Play, 
-  CheckCircle2, Star, User, AlertCircle, XCircle, RefreshCw, X 
+import {
+  Search, Database, Award, ShieldAlert, TrendingUp, Clock, FileText, ChevronRight,
+  User, Activity, Gauge
 } from 'lucide-react';
-import { AreaChart, Area, ResponsiveContainer } from 'recharts';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { cn } from '../../utils/cn';
-import { Topic, Post } from '../../data/mockTopics';
+import { DecisionDrawer, DecisionDrawerItem } from './DecisionDrawer';
+import { timeAgo, fmtCountdown } from './format';
+import type { CandidateQueueLite, DiscoveryDecisionLite, PublishedPostLite } from '../../lib/agentTypes';
 
 export const DashboardOverview: React.FC = () => {
-  const { 
-    posts, 
-    memoryNodes, 
-    decisions, 
+  const {
+    memoryNodes,
     countdown,
     status,
+    currentActionDetails,
     secondsSinceLastScan,
-    missionProgress,
     currentTaskName,
     nextPublishCountdown,
-    pipelineStats,
     rejectedTodayList,
     lastDecisionTimeSeconds,
     autonomousTimelineLogs,
     novaLiveFocus,
-    discoveredTopics,
     config,
-    activeTopic
+    activeTopic,
+    discoveryDecisions,
+    candidateQueue,
+    memoryEntries,
+    publishedPosts,
+    sourceHealth,
+    scheduledJob,
+    editorialThresholds,
+    setActiveTab
   } = useAgent();
 
-  const [selectedPostForDrawer, setSelectedPostForDrawer] = useState<Post | null>(null);
-  const [liveThinkingIndex, setLiveThinkingIndex] = useState(0);
+  const [drawerItem, setDrawerItem] = useState<DecisionDrawerItem | null>(null);
+  const [logIndex, setLogIndex] = useState(0);
 
-  // Estimate completion seconds based on progress
-  const estCompletion = useMemo(() => {
-    if (status === 'idle' || status === 'inactive') return "N/A";
-    const remSeconds = Math.max(1, Math.round((100 - missionProgress) * 0.2));
-    return `${remSeconds} seconds`;
-  }, [status, missionProgress]);
+  // Real pipeline counts (all from persisted tables)
+  const acceptedCount = useMemo(() => discoveryDecisions.filter(d => d.decision === 'accepted').length, [discoveryDecisions]);
+  const rejectedCount = useMemo(() => discoveryDecisions.filter(d => d.decision === 'rejected').length, [discoveryDecisions]);
+  const heldCount = useMemo(() => discoveryDecisions.filter(d => d.decision === 'held').length, [discoveryDecisions]);
+  const totalDecisions = discoveryDecisions.length;
+  const acceptanceRate = totalDecisions > 0 ? Math.round((acceptedCount / totalDecisions) * 100) : null;
+  const realPosts = useMemo(() => publishedPosts.filter(p => !p.isDemo), [publishedPosts]);
+  const demoPosts = useMemo(() => publishedPosts.filter(p => p.isDemo), [publishedPosts]);
 
-  // Stage details string mapping
-  const reasoningStage = useMemo(() => {
-    switch (status) {
-      case 'scanning': return "Source Ingestion & Registry Ingress";
-      case 'filtering': return "Credibility Scan & Noise Filtration";
-      case 'reasoning': return "Evaluating Engineering Significance";
-      case 'memory_check': return "Memory Comparison";
-      case 'writing': return "Synthesizing Architecture Report";
-      case 'publishing': return "Sharing Technical Insight";
-      case 'learning': return "Learned from Today's Publication";
-      default: return "Observing AI Ecosystem";
-    }
-  }, [status]);
+  const decisionByPost = useMemo(() => {
+    const map = new Map<string, DiscoveryDecisionLite>();
+    for (const d of discoveryDecisions) if (d.publishedPostId) map.set(d.publishedPostId, d);
+    return map;
+  }, [discoveryDecisions]);
 
-  const getHumanizedStatus = (s: string) => {
-    switch (s) {
-      case 'scanning': return 'Observing AI Ecosystem';
-      case 'filtering': return 'Removing Low-Value Topics';
-      case 'reasoning': return 'Evaluating Engineering Significance';
-      case 'memory_check': return 'Checking Historical Memory';
-      case 'writing': return 'Synthesizing Architecture Report';
-      case 'publishing': return 'Sharing Technical Insight';
-      case 'learning': return 'Learned from Today\'s Publication';
-      case 'idle': return 'Observing AI Ecosystem';
-      default: return 'Active';
-    }
+  const rejectedToday = useMemo(() => {
+    // Persisted rejected decisions (real, with human-readable reasons)
+    const real = discoveryDecisions.filter(d => d.decision === 'rejected').map(d => ({ title: d.title, reason: d.explanation }));
+    // Sim-engine rejected list (labeled as simulation when rendered)
+    return { real, sim: rejectedTodayList };
+  }, [discoveryDecisions, rejectedTodayList]);
+
+  const toDrawerCandidate = (c: CandidateQueueLite): DecisionDrawerItem => ({
+    kind: 'candidate',
+    title: c.title,
+    sourceName: c.sourceName,
+    sourceType: c.sourceType,
+    canonicalUrl: c.canonicalUrl,
+    summary: c.summary,
+    publishedAt: c.publishedAt,
+    decision: c.decision,
+    totalScore: c.totalScore,
+    explanation: c.explanation
+  });
+
+  const toDrawerPost = (p: PublishedPostLite): DecisionDrawerItem => {
+    const dec = decisionByPost.get(p.id);
+    return {
+      kind: 'post',
+      title: p.title,
+      createdAt: p.createdAt,
+      isDemo: p.isDemo,
+      decision: dec ? dec.decision : (p.isDemo ? null : 'accepted'),
+      totalScore: dec ? dec.totalScore : p.totalScore,
+      componentScores: dec ? [
+        { label: 'Persona relevance', value: dec.personaRelevance },
+        { label: 'Technical impact', value: dec.technicalImpact },
+        { label: 'Source quality', value: dec.sourceQuality },
+        { label: 'Recency', value: dec.recency },
+        { label: 'Novelty', value: dec.novelty },
+        { label: 'Discussion value', value: dec.discussionValue },
+        { label: 'Evidence confidence', value: dec.evidenceConfidence }
+      ] : null,
+      explanation: dec ? dec.explanation : null,
+      generationStatus: dec ? dec.generationStatus : undefined,
+      generationFailure: dec ? dec.generationFailure : null,
+      quality: dec ? dec.quality : null,
+      body: p.body,
+      opinion: p.opinion,
+      rationale: p.rationale,
+      confidence: p.confidence,
+      citedUrls: p.citedUrls,
+      relatedPosts: p.relatedPosts,
+      links: p.links,
+      sources: p.sources,
+      sourceName: dec ? dec.sourceName : null,
+      publishedAt: undefined
+    };
   };
 
-  // Helper to determine if a decision flow block is active
+  // Cycle through the engine's real timeline logs (falling back to the current
+  // action detail). Nothing here is invented on the client.
+  const activityMessages = useMemo(() => {
+    if (autonomousTimelineLogs.length > 0) return autonomousTimelineLogs.map(l => l.message);
+    return [currentActionDetails];
+  }, [autonomousTimelineLogs, currentActionDetails]);
+
+  useEffect(() => {
+    if (activityMessages.length <= 1) return;
+    const interval = setInterval(() => setLogIndex(prev => (prev + 1) % activityMessages.length), 4500);
+    return () => clearInterval(interval);
+  }, [activityMessages.length]);
+
+  const nextCycleLabel = scheduledJob
+    ? `Next cycle ${fmtCountdown(scheduledJob.nextRunAtMs)}`
+    : status === 'idle'
+      ? `Next ingest in ${countdown}s`
+      : 'Pipeline active';
+
+  // Top metrics — all real persisted counts
+  const editorialMetrics = useMemo(() => {
+    return [
+      {
+        title: "Candidates Discovered",
+        value: `${candidateQueue.length}`,
+        subtitle: "Persisted by the discovery runner",
+        icon: <Search className="w-5 h-5 text-blue-400" />,
+        glow: "cyan" as const
+      },
+      {
+        title: "Editorial Acceptance",
+        value: acceptanceRate == null ? "n/a" : `${acceptanceRate}%`,
+        subtitle: `${acceptedCount}/${totalDecisions} decisions accepted`,
+        icon: <TrendingUp className="w-5 h-5 text-cyber-cyan" />,
+        glow: "cyan" as const
+      },
+      {
+        title: "Durable Memory",
+        value: `${memoryEntries.length}`,
+        subtitle: "Persisted editorial memory entries",
+        icon: <Database className="w-5 h-5 text-cyber-purple" />,
+        glow: "purple" as const
+      },
+      {
+        title: "Publications",
+        value: `${realPosts.length}`,
+        subtitle: demoPosts.length > 0 ? `${demoPosts.length} demo/seed posts labeled` : "From the durable posts table",
+        icon: <Award className="w-5 h-5 text-cyber-emerald" />,
+        glow: "emerald" as const
+      }
+    ];
+  }, [candidateQueue.length, acceptanceRate, acceptedCount, totalDecisions, memoryEntries.length, realPosts.length, demoPosts.length]);
+
   const isFlowActive = (blockName: string) => {
     switch (blockName) {
       case 'scanning': return status === 'scanning';
@@ -86,148 +177,24 @@ export const DashboardOverview: React.FC = () => {
     }
   };
 
-  // Top metrics
-  const editorialMetrics = useMemo(() => {
-    return [
-      {
-        title: "Topics Discovered Today",
-        value: `${pipelineStats.scanCount} Topics`,
-        subtitle: "Collected from trusted AI sources",
-        icon: <Search className="w-5 h-5 text-blue-400" />,
-        glow: "cyan" as const
-      },
-      {
-        title: "Editorial Acceptance",
-        value: "61%",
-        subtitle: "Topics worthy of publication",
-        icon: <TrendingUp className="w-5 h-5 text-cyber-cyan" />,
-        glow: "cyan" as const
-      },
-      {
-        title: "Knowledge Memory",
-        value: `${pipelineStats.publishCount + 137} Articles`,
-        subtitle: "Historical publications remembered",
-        icon: <Database className="w-5 h-5 text-cyber-purple" />,
-        glow: "purple" as const
-      },
-      {
-        title: "Publishing Confidence",
-        value: "93%",
-        subtitle: "Confidence before publishing",
-        icon: <Award className="w-5 h-5 text-cyber-emerald" />,
-        glow: "emerald" as const
-      }
-    ];
-  }, [pipelineStats]);
-
-  // Live Thinking Messages
-  const thinkingMessages = [
-    "Evaluating DeepSeek MLA token optimizations...",
-    "Querying vector database for duplicate article collisions...",
-    "Comparing candidate topics against previous 18 publications...",
-    "Ranking candidate queues according to structural engineering impact...",
-    "Writing detailed architecture summaries and editorial opinions...",
-    "Scanning research feeds (arXiv, GitHub labs, OpenAI)...",
-    "Waiting for next autonomous ingestion sweep..."
-  ];
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setLiveThinkingIndex(prev => (prev + 1) % thinkingMessages.length);
-    }, 4500);
-    return () => clearInterval(interval);
-  }, []);
-
-  const heuristics = useMemo(() => {
-    const d = config.domain.toLowerCase();
-    if (d.includes("security")) {
-      return { cred: "95%", impact: "90%", novelty: "85%", match: "15%", filters: "Wellness wraps, duplicate products, consumer hype" };
-    }
-    if (d.includes("robotics")) {
-      return { cred: "90%", impact: "88%", novelty: "80%", match: "20%", filters: "Startup updates, hobbyist kits, home toys, funding announcements" };
-    }
-    if (d.includes("open source") || d.includes("os")) {
-      return { cred: "90%", impact: "85%", novelty: "80%", match: "30%", filters: "Hype libraries, non-open models, general wellness tools, commercial wrappers" };
-    }
-    return { cred: "90%", impact: "85%", novelty: "80%", match: "70%", filters: "Rumours, Marketing announcements, funding, duplicate news, consumer trends, memes" };
-  }, [config.domain]);
-
-  const trustRatings = useMemo(() => {
-    const d = config.domain.toLowerCase();
-    if (d.includes("security")) {
-      return [
-        { label: "arXiv Security:", val: "★★★★★" },
-        { label: "GitHub Advisories:", val: "★★★★★" },
-        { label: "CISA Stream:", val: "★★★★★" },
-        { label: "OpenAI Trust:", val: "★★★★" },
-        { label: "Reddit /r/netsec:", val: "★★★" },
-        { label: "X / Twitter feeds:", val: "★★" }
-      ];
-    }
-    if (d.includes("robotics")) {
-      return [
-        { label: "ROS Discourse:", val: "★★★★★" },
-        { label: "IEEE Spectrum:", val: "★★★★★" },
-        { label: "arXiv Robotics:", val: "★★★★★" },
-        { label: "GitHub commits:", val: "★★★★" },
-        { label: "RoboBlogs:", val: "★★★" },
-        { label: "X / Twitter:", val: "★" }
-      ];
-    }
-    return [
-      { label: "OpenAI Blog:", val: "★★★★★" },
-      { label: "Anthropic News:", val: "★★★★★" },
-      { label: "GitHub Commits:", val: "★★★★★" },
-      { label: "arXiv Papers:", val: "★★★★★" },
-      { label: "HuggingFace:", val: "★★★★★" },
-      { label: "Reddit machinelearning:", val: "★★★" }
-    ];
-  }, [config.domain]);
-
-  const graphLabels = useMemo(() => {
-    const d = config.domain.toLowerCase();
-    if (d.includes("security")) {
-      return ["Security", "Jailbreak", "Attack", "Audit"];
-    }
-    if (d.includes("robotics")) {
-      return ["ROS2", "SLAM", "Actuator", "Control"];
-    }
-    return ["DeepSeek", "MLA", "Memory", "Inference"];
-  }, [config.domain]);
-
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.1
-      }
-    }
-  };
-
-  const itemVariants = {
-    hidden: { opacity: 0, x: -20 },
-    show: { opacity: 1, x: 0, transition: { type: "spring" as const, stiffness: 100 } }
-  };
-
   return (
     <div className="space-y-6">
-      {/* Live AI Thought Stream */}
+      {/* Activity stream */}
       <div className="bg-black/60 border border-cyber-cyan/20 px-4 py-2.5 rounded-lg flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
         <div className="flex items-center gap-2">
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyber-cyan opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-cyber-cyan"></span>
           </span>
-          <span className="font-display font-semibold uppercase tracking-wider text-cyber-cyan">Thought Stream:</span>
-          <motion.span 
-            key={liveThinkingIndex}
+          <span className="font-display font-semibold uppercase tracking-wider text-cyber-cyan">Activity Log:</span>
+          <motion.span
+            key={logIndex}
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -5 }}
             className="text-gray-300 font-mono italic"
           >
-            {`"${thinkingMessages[liveThinkingIndex]}"`}
+            {`"${activityMessages[logIndex % activityMessages.length] ?? currentActionDetails}"`}
           </motion.span>
         </div>
 
@@ -237,79 +204,64 @@ export const DashboardOverview: React.FC = () => {
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyber-emerald opacity-75"></span>
             <span className="relative inline-flex rounded-full h-2 w-2 bg-cyber-emerald"></span>
           </span>
-          <span className="text-white font-bold">● AI ACTIVE</span>
+          <span className="text-white font-bold">● ENGINE ACTIVE</span>
           <span className="text-gray-700">|</span>
           <span>Decision: <strong className="text-cyber-cyan">{lastDecisionTimeSeconds}s ago</strong></span>
           <span className="text-gray-700">|</span>
           <span>Next Ingest: <strong className="text-cyber-purple">{status !== 'idle' ? 'PAUSED' : `${countdown}s`}</strong></span>
-          <span className="text-gray-700">|</span>
-          <span>Cycle: <strong className="text-white">{getHumanizedStatus(status)}</strong></span>
         </div>
       </div>
 
       {/* 1. Live Activity Hero Banner */}
       <div className="bg-gradient-to-r from-cyber-cyan/15 via-cyber-purple/5 to-transparent border border-cyber-cyan/20 rounded-xl p-6 relative overflow-hidden">
         <div className="absolute right-4 bottom-2 opacity-5 font-mono text-[80px] text-cyber-cyan pointer-events-none select-none font-bold uppercase tracking-widest leading-none">
-          Autonomous
+          {config.name}
         </div>
-        
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-center">
           <div className="lg:col-span-2 space-y-3">
             <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full border border-cyber-cyan/35 bg-cyber-cyan/10 text-cyber-cyan font-mono text-[9px] tracking-wider uppercase font-semibold">
-              <Zap className="w-3 h-3 text-cyan-400 animate-pulse" />
-              Active Reasoning Loop
+              <Activity className="w-3 h-3 text-cyan-400" />
+              {status !== 'idle' && status !== 'inactive' ? 'Pipeline Cycle In Progress' : nextCycleLabel}
             </div>
-            
+
             <div>
               <h2 className="font-display text-xs font-bold text-gray-500 uppercase tracking-widest font-mono">
                 Current Mission
               </h2>
               <p className="font-display text-base font-bold text-white tracking-wide uppercase mt-1">
-                {status !== 'idle' && status !== 'inactive' ? currentTaskName : "Evaluating OpenAI's GPT-5 reasoning thresholds"}
+                {currentTaskName}
               </p>
             </div>
 
-            {status !== 'idle' && status !== 'inactive' ? (
-              <div className="space-y-1.5">
-                <div className="flex justify-between font-mono text-[9px] text-gray-400">
-                  <span>Logic Sync progress</span>
-                  <span className="text-cyber-cyan font-semibold">{missionProgress}%</span>
-                </div>
-                <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-gradient-to-r from-cyber-cyan to-cyber-purple transition-all duration-300"
-                    style={{ width: `${missionProgress}%` }}
-                  />
-                </div>
+            <div className="space-y-1.5">
+              <div className="flex justify-between font-mono text-[9px] text-gray-400">
+                <span>Pipeline progress</span>
+                <span className="text-cyber-cyan font-semibold">
+                  {activeTopic ? 'Run in progress' : 'Idle — waiting for next cycle'}
+                </span>
               </div>
-            ) : (
-              <div className="space-y-1.5">
-                <div className="flex justify-between font-mono text-[9px] text-gray-400">
-                  <span>Logic Sync progress</span>
-                  <span className="text-cyber-cyan font-semibold">72%</span>
-                </div>
-                <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                  <div 
-                    className="h-full bg-gradient-to-r from-cyber-cyan to-cyber-purple transition-all duration-300"
-                    style={{ width: `72%` }}
-                  />
-                </div>
+              <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                <div
+                  className={cn("h-full bg-gradient-to-r from-cyber-cyan to-cyber-purple transition-all duration-300", status !== 'idle' && "animate-pulse")}
+                  style={{ width: `${activeTopic ? 40 : 0}%` }}
+                />
               </div>
-            )}
+            </div>
           </div>
 
           <div className="border-t lg:border-t-0 lg:border-l border-white/10 pt-4 lg:pt-0 lg:pl-6 space-y-3.5">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <span className="block text-[8px] text-gray-500 font-mono uppercase tracking-widest">Current reasoning stage</span>
+                <span className="block text-[8px] text-gray-500 font-mono uppercase tracking-widest">Engine status</span>
                 <span className="font-display text-[10px] text-white font-bold tracking-wider uppercase mt-1 block">
-                  {status !== 'idle' && status !== 'inactive' ? reasoningStage : "Memory Comparison"}
+                  {status}
                 </span>
               </div>
               <div>
-                <span className="block text-[8px] text-gray-500 font-mono uppercase tracking-widest">Est. Completion</span>
-                <span className="font-mono text-[10px] text-cyber-cyan font-bold tracking-wider mt-1 block animate-pulse">
-                  {status !== 'idle' && status !== 'inactive' ? estCompletion : "38 seconds"}
+                <span className="block text-[8px] text-gray-500 font-mono uppercase tracking-widest">Next scheduled job</span>
+                <span className="font-mono text-[10px] text-cyber-cyan font-bold tracking-wider mt-1 block">
+                  {nextCycleLabel}
                 </span>
               </div>
             </div>
@@ -319,10 +271,10 @@ export const DashboardOverview: React.FC = () => {
 
       {/* 2. Top Editorial Metric Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {editorialMetrics.map((met, idx) => (
-          <GlassCard 
-            key={met.title} 
-            className="p-4 flex items-center gap-4 border-white/5 bg-white/1 transform hover:translate-y-[-2px] hover:shadow-[0_0_20px_rgba(0,240,255,0.05)] transition-all duration-300" 
+        {editorialMetrics.map((met) => (
+          <GlassCard
+            key={met.title}
+            className="p-4 flex items-center gap-4 border-white/5 bg-white/1 transform hover:translate-y-[-2px] hover:shadow-[0_0_20px_rgba(0,240,255,0.05)] transition-all duration-300"
             glowColor={met.glow}
           >
             <div className={cn(
@@ -342,77 +294,65 @@ export const DashboardOverview: React.FC = () => {
         ))}
       </div>
 
-      {/* 3. Autonomous Decision Flow */}
+      {/* 3. Editorial Decision Flow — persisted counts */}
       <div className="border border-white/5 bg-black/45 rounded-xl p-5 backdrop-blur-md">
         <h4 className="font-display text-[10px] font-bold tracking-widest text-white uppercase flex items-center gap-1.5 mb-4">
-          <Zap className="w-3.5 h-3.5 text-cyber-cyan" />
-          Autonomous Decision Flow Heuristic
+          <Gauge className="w-3.5 h-3.5 text-cyber-cyan" />
+          Editorial Pipeline · Persisted Counts
         </h4>
-        
+
         <div className="flex flex-col md:flex-row items-center justify-between gap-3 text-center md:text-left">
           <div className={cn(
             "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
-            isFlowActive('scanning') 
-              ? "bg-blue-500/10 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.2)] scale-105 animate-pulse"
-              : "bg-black/40 border-white/5 opacity-70"
+            isFlowActive('scanning') ? "bg-blue-500/10 border-blue-500/50" : "bg-black/40 border-white/5 opacity-70"
           )}>
-            <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Topics Found</div>
-            <div className="font-display text-sm font-bold text-blue-400 mt-0.5">{pipelineStats.scanCount}</div>
+            <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Candidates</div>
+            <div className="font-display text-sm font-bold text-blue-400 mt-0.5">{candidateQueue.length}</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
           <div className={cn(
             "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
-            isFlowActive('filtering') 
-              ? "bg-cyber-red/10 border-cyber-red/50 shadow-[0_0_15px_rgba(239,68,68,0.2)] scale-105 animate-pulse"
-              : "bg-black/40 border-white/5 opacity-70"
+            isFlowActive('filtering') ? "bg-cyber-red/10 border-cyber-red/50" : "bg-black/40 border-white/5 opacity-70"
           )}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Rejected</div>
-            <div className="font-display text-sm font-bold text-cyber-red mt-0.5">{pipelineStats.filterCount}</div>
+            <div className="font-display text-sm font-bold text-cyber-red mt-0.5">{rejectedCount}</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
           <div className={cn(
             "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
-            isFlowActive('reasoning') 
-              ? "bg-yellow-500/10 border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.2)] scale-105 animate-pulse"
-              : "bg-black/40 border-white/5 opacity-70"
+            isFlowActive('reasoning') ? "bg-yellow-500/10 border-yellow-500/50" : "bg-black/40 border-white/5 opacity-70"
           )}>
-            <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Investigating</div>
-            <div className="font-display text-sm font-bold text-yellow-400 mt-0.5">{pipelineStats.reasonCount}</div>
+            <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Held</div>
+            <div className="font-display text-sm font-bold text-yellow-400 mt-0.5">{heldCount}</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
           <div className={cn(
             "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
-            isFlowActive('writing') 
-              ? "bg-purple-500/10 border-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.2)] scale-105 animate-pulse"
-              : "bg-black/40 border-white/5 opacity-70"
+            isFlowActive('writing') ? "bg-purple-500/10 border-purple-500/50" : "bg-black/40 border-white/5 opacity-70"
           )}>
-            <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Selected</div>
-            <div className="font-display text-sm font-bold text-cyber-purple mt-0.5">{pipelineStats.writeCount}</div>
+            <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Accepted</div>
+            <div className="font-display text-sm font-bold text-cyber-purple mt-0.5">{acceptedCount}</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
           <div className={cn(
             "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
-            isFlowActive('publishing') 
-              ? "bg-emerald-500/10 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.2)] scale-105 animate-pulse"
-              : "bg-black/40 border-white/5 opacity-70"
+            isFlowActive('publishing') ? "bg-emerald-500/10 border-emerald-500/50" : "bg-black/40 border-white/5 opacity-70"
           )}>
-            <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Publishing</div>
-            <div className="font-display text-sm font-bold text-cyber-emerald mt-0.5">{pipelineStats.publishCount}</div>
+            <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Published</div>
+            <div className="font-display text-sm font-bold text-cyber-emerald mt-0.5">{realPosts.length}</div>
           </div>
           <ChevronRight className="w-4 h-4 text-white/20 hidden md:block" />
 
           <div className={cn(
             "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
-            isFlowActive('learning') 
-              ? "bg-pink-500/10 border-pink-500/50 shadow-[0_0_15px_rgba(236,72,153,0.2)] scale-105 animate-pulse"
-              : "bg-black/40 border-white/5 opacity-70"
+            isFlowActive('learning') ? "bg-pink-500/10 border-pink-500/50" : "bg-black/40 border-white/5 opacity-70"
           )}>
-            <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Learning</div>
-            <div className="font-display text-[9px] font-bold text-pink-400 mt-1 uppercase tracking-wider">Memory Updated</div>
+            <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Memory</div>
+            <div className="font-display text-sm font-bold text-pink-400 mt-0.5">{memoryEntries.length}</div>
           </div>
         </div>
       </div>
@@ -422,45 +362,30 @@ export const DashboardOverview: React.FC = () => {
 
       {/* 5. Main Content Grid (3 Columns layout) */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Column 1: Topic Queues and Rejected Logs */}
+        {/* Column 1: Candidate queue + rejected */}
         <div className="lg:col-span-1 space-y-4">
-          {/* Candidate Topic Queue */}
+          {/* Candidate Queue */}
           <GlassCard className="p-5" glowColor="cyan">
             <div>
               <div className="mb-4">
                 <h4 className="font-display text-xs font-bold tracking-wider text-white uppercase flex items-center gap-1.5">
-                  <Play className="w-3.5 h-3.5 text-cyber-cyan animate-pulse" />
-                  Candidate Topic Queue
+                  <Search className="w-3.5 h-3.5 text-cyber-cyan" />
+                  Candidate Queue
                 </h4>
                 <p className="text-[8px] text-gray-500 uppercase tracking-widest font-mono mt-0.5">
-                  Live ingestion scans being evaluated
+                  Persisted discovery candidates
                 </p>
               </div>
 
               <div className="space-y-2.5 max-h-[280px] overflow-y-auto pr-1">
-                {discoveredTopics.map((cand, idx) => (
-                  <div 
-                    key={`${cand.id}-${idx}`} 
+                {candidateQueue.length === 0 && (
+                  <p className="text-[10px] text-gray-600 font-mono text-center py-6">No candidates persisted yet</p>
+                )}
+                {candidateQueue.map(cand => (
+                  <div
+                    key={cand.id}
                     className="p-3 rounded bg-black/40 border border-white/5 text-[10px] space-y-2 cursor-pointer hover:border-cyber-cyan/35 transition-colors"
-                    onClick={() => {
-                      // Construct a dynamic mock Post based on candidate values
-                      const mockPost: Post = {
-                        id: cand.id,
-                        title: cand.title,
-                        createdAt: new Date().toISOString(),
-                        text: `Candidate topic sourced from ${cand.source}. Detailed credibility checking results indicate score of ${cand.credibilityScore}% with Novelty at ${cand.noveltyScore}%.`,
-                        opinion: `Editorial evaluation recommeds: ${cand.recommendation}. Engineering impact score calculated at ${cand.importanceScore}/100.`,
-                        sources: cand.sources,
-                        confidenceScore: cand.confidenceScore || 90,
-                        category: cand.category,
-                        importanceScore: cand.importanceScore || 80,
-                        noveltyScore: cand.noveltyScore || 80,
-                        rationale: cand.rejectionReason || `High technical architecture alignment in ${cand.category}.`,
-                        publicationId: `CAND-${cand.id.toUpperCase()}`,
-                        relatedPosts: []
-                      };
-                      setSelectedPostForDrawer(mockPost);
-                    }}
+                    onClick={() => setDrawerItem(toDrawerCandidate(cand))}
                   >
                     <div className="flex justify-between items-start gap-2">
                       <span className="font-display font-medium text-white leading-relaxed truncate max-w-[170px]">
@@ -468,24 +393,23 @@ export const DashboardOverview: React.FC = () => {
                       </span>
                       <span className={cn(
                         "px-1 py-0.2 rounded text-[7px] font-display uppercase tracking-widest font-bold border flex-shrink-0",
-                        cand.recommendation === 'Accept' && "bg-cyber-emerald/10 text-cyber-emerald border-cyber-emerald/25",
-                        cand.recommendation === 'Reject' && "bg-cyber-red/10 text-cyber-red border-cyber-red/25",
-                        cand.recommendation === 'Investigate' && "bg-yellow-500/10 text-yellow-400 border-yellow-500/25"
+                        cand.decision === 'accepted' && "bg-cyber-emerald/10 text-cyber-emerald border-cyber-emerald/25",
+                        cand.decision === 'rejected' && "bg-cyber-red/10 text-cyber-red border-cyber-red/25",
+                        cand.decision === 'held' && "bg-yellow-500/10 text-yellow-400 border-yellow-500/25",
+                        cand.decision == null && "bg-gray-500/10 text-gray-400 border-gray-500/25"
                       )}>
-                        {cand.recommendation === 'Accept' ? 'Publish' : cand.recommendation === 'Reject' ? 'Rejected' : 'Investigating'}
+                        {cand.decision ?? 'pending'}
                       </span>
                     </div>
 
-                    {/* Scores row */}
                     <div className="flex justify-between font-mono text-[8px] text-gray-500 border-y border-white/5 py-1">
-                      <span>Impact: <strong className="text-white">{cand.importanceScore || 90}%</strong></span>
-                      <span>Novelty: <strong className="text-white">{cand.noveltyScore || 85}%</strong></span>
-                      <span>Cred: <strong className="text-white">{cand.credibilityScore}%</strong></span>
+                      <span>Source: <strong className="text-white truncate max-w-[100px] inline-block align-bottom">{cand.sourceName}</strong></span>
+                      {cand.totalScore != null && <span>Score: <strong className="text-white">{cand.totalScore}</strong></span>}
                     </div>
 
-                    {cand.recommendation === 'Reject' && cand.rejectionReason && (
+                    {cand.decision === 'rejected' && cand.explanation && (
                       <p className="text-[8.5px] text-cyber-red leading-normal pl-2 border-l border-cyber-red/30">
-                        {cand.rejectionReason}
+                        {cand.explanation}
                       </p>
                     )}
                   </div>
@@ -494,33 +418,43 @@ export const DashboardOverview: React.FC = () => {
             </div>
           </GlassCard>
 
-          {/* Rejected Topics Today */}
+          {/* Rejected Topics */}
           <GlassCard className="p-5" glowColor="none">
             <div>
               <div className="mb-4">
                 <h4 className="font-display text-xs font-bold tracking-wider text-white uppercase flex items-center gap-1.5">
                   <ShieldAlert className="w-4 h-4 text-cyber-red" />
-                  Rejected Topics Today
+                  Rejected Topics &amp; Reasons
                 </h4>
                 <p className="text-[8px] text-gray-500 uppercase tracking-widest font-mono mt-0.5">
-                  Filtered due to editorial policy thresholds
+                  Persisted editorial rejections
                 </p>
               </div>
 
               <div className="space-y-2.5 max-h-[250px] overflow-y-auto pr-1">
-                {rejectedTodayList.map((rej, idx) => (
-                  <div key={`rej-${idx}-${rej.title.slice(0, 10)}`} className="p-3 rounded bg-black/40 border border-cyber-red/10 text-[9px] space-y-2">
+                {rejectedToday.real.length === 0 && rejectedToday.sim.length === 0 && (
+                  <p className="text-[10px] text-gray-600 font-mono text-center py-6">No rejections recorded</p>
+                )}
+                {rejectedToday.real.map(rej => (
+                  <div key={`rej-${rej.title.slice(0, 40)}`} className="p-3 rounded bg-black/40 border border-cyber-red/10 text-[9px] space-y-2">
                     <div className="flex justify-between items-start gap-1">
-                      <span className="font-display font-medium text-white leading-relaxed">
-                        {rej.title}
-                      </span>
+                      <span className="font-display font-medium text-white leading-relaxed">{rej.title}</span>
                       <span className="px-1.5 py-0.2 rounded text-[7px] font-mono uppercase bg-cyber-red/10 text-cyber-red border border-cyber-red/20 flex-shrink-0">
                         Rejected
                       </span>
                     </div>
-                    <p className="text-[8.5px] text-cyber-red leading-normal pl-2 border-l border-cyber-red/30">
-                      {rej.reason}
-                    </p>
+                    <p className="text-[8.5px] text-cyber-red leading-normal pl-2 border-l border-cyber-red/30">{rej.reason}</p>
+                  </div>
+                ))}
+                {rejectedToday.sim.map((rej, idx) => (
+                  <div key={`rejsim-${idx}-${rej.title.slice(0, 10)}`} className="p-3 rounded bg-black/40 border border-white/5 text-[9px] space-y-2">
+                    <div className="flex justify-between items-start gap-1">
+                      <span className="font-display font-medium text-gray-300 leading-relaxed">{rej.title}</span>
+                      <span className="px-1.5 py-0.2 rounded text-[7px] font-mono uppercase bg-gray-500/10 text-gray-400 border border-gray-500/20 flex-shrink-0">
+                        Sim
+                      </span>
+                    </div>
+                    <p className="text-[8.5px] text-gray-400 leading-normal pl-2 border-l border-white/10">{rej.reason}</p>
                   </div>
                 ))}
               </div>
@@ -528,24 +462,33 @@ export const DashboardOverview: React.FC = () => {
           </GlassCard>
         </div>
 
-        {/* Column 2: Today's Featured Publication & Drawer Triggers */}
+        {/* Column 2: Publications + timeline */}
         <div className="lg:col-span-1 space-y-4 flex flex-col justify-between">
           <div className="space-y-4">
-            {posts.slice(0, 2).map((post, idx) => (
-              <GlassCard 
-                key={`${post.id}-${idx}`} 
+            {(realPosts.length > 0 ? realPosts.slice(0, 2) : demoPosts.slice(0, 2)).map((post) => (
+              <GlassCard
+                key={post.id}
                 className="p-5 flex flex-col justify-between cursor-pointer border-white/5 hover:border-cyber-cyan/35 hover:scale-[1.01] transition-all duration-300"
                 glowColor="cyan"
-                onClick={() => setSelectedPostForDrawer(post)}
+                onClick={() => setDrawerItem(toDrawerPost(post))}
               >
                 <div className="space-y-3">
                   <div className="flex justify-between items-center border-b border-white/5 pb-2">
                     <span className="text-[8px] text-cyber-cyan font-mono uppercase tracking-widest font-bold">
-                      Featured Publication • {post.publicationId}
+                      {post.isDemo ? 'Demo / Seed Publication' : 'Published'}
                     </span>
-                    <span className="font-mono text-[8px] text-cyber-emerald bg-cyber-emerald/10 px-1.5 py-0.2 rounded font-bold border border-cyber-emerald/20">
-                      Conf: {post.confidenceScore}%
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {post.isDemo && (
+                        <span className="font-mono text-[8px] text-yellow-400 bg-yellow-500/10 px-1.5 py-0.2 rounded font-bold border border-yellow-500/20">
+                          SIM
+                        </span>
+                      )}
+                      {post.confidence != null && (
+                        <span className="font-mono text-[8px] text-cyber-emerald bg-cyber-emerald/10 px-1.5 py-0.2 rounded font-bold border border-cyber-emerald/20">
+                          Conf: {post.confidence}%
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <h3 className="font-display text-xs font-semibold text-white tracking-wide uppercase truncate">
@@ -553,72 +496,68 @@ export const DashboardOverview: React.FC = () => {
                   </h3>
 
                   <p className="text-[10px] text-gray-400 leading-relaxed truncate-2-lines">
-                    {post.text.slice(0, 160)}...
+                    {post.body.slice(0, 160)}...
                   </p>
 
-                  {/* Explainability factors inline */}
+                  {/* Real explainability factors */}
                   <div className="grid grid-cols-2 gap-2 border-t border-white/5 pt-2.5 font-mono text-[8px] text-gray-500">
                     <div className="flex justify-between">
-                      <span>Credibility:</span>
-                      <span className="text-white">97%</span>
+                      <span>Editorial score:</span>
+                      <span className="text-white">{post.totalScore != null ? `${post.totalScore}/100` : '—'}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Novelty Index:</span>
-                      <span className="text-white">{post.noveltyScore}%</span>
-                    </div>
-                    <div className="flex justify-between font-bold">
-                      <span>Impact Rating:</span>
-                      <span className="text-cyber-cyan">{post.importanceScore}/100</span>
+                      <span>Related posts:</span>
+                      <span className="text-cyber-purple">{post.links.length}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Memory match:</span>
-                      <span className="text-cyber-emerald">12%</span>
+                      <span>Cited sources:</span>
+                      <span className="text-cyber-cyan">{post.citedUrls.length}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Published:</span>
+                      <span className="text-white">{timeAgo(post.createdAt)}</span>
                     </div>
                   </div>
-
-                <div className="text-[8px] text-gray-400 pl-2 border-l border-cyber-cyan/30 mt-2 font-mono">
-                  {"// Click card to open full decision replay logic"}
-                </div>
                 </div>
               </GlassCard>
             ))}
+
+            {publishedPosts.length === 0 && (
+              <div className="border border-dashed border-white/5 rounded-xl bg-black/20 p-8 text-center">
+                <FileText className="w-6 h-6 text-gray-600 mx-auto mb-2" />
+                <p className="text-xs text-gray-500 uppercase tracking-wider">No posts published yet</p>
+                <p className="text-[10px] text-gray-600 font-mono mt-0.5">Accepted decisions that pass the quality gate appear here</p>
+              </div>
+            )}
           </div>
 
-          {/* Autonomous Timeline panel (Now dynamically scrolling!) */}
+          {/* Timeline panel */}
           <GlassCard className="p-4 flex-1 flex flex-col justify-between" glowColor="none">
             <div className="mb-3">
               <h4 className="font-display text-[9px] font-bold text-gray-500 uppercase tracking-widest flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-cyber-cyan" />
-                Autonomous Timeline Logs
+                Engine Timeline Logs
               </h4>
             </div>
 
             <div className="space-y-2.5 max-h-[170px] overflow-y-auto pr-1 relative before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[1px] before:bg-white/5 pl-5 font-mono text-[9px]">
-              <AnimatePresence initial={false}>
-                {autonomousTimelineLogs.map((log, idx) => (
-                  <motion.div 
-                    key={`${log.timestamp}-${idx}`}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ duration: 0.3 }}
-                    className="relative"
-                  >
-                    <span className="absolute -left-[20.5px] top-1.5 w-1.5 h-1.5 rounded-full bg-cyber-cyan" />
-                    <span className="text-gray-500 mr-1">{log.timestamp}</span> {log.message}
-                  </motion.div>
-                ))}
-              </AnimatePresence>
+              {autonomousTimelineLogs.map((log, idx) => (
+                <div key={`${log.timestamp}-${idx}`} className="relative">
+                  <span className="absolute -left-[20.5px] top-1.5 w-1.5 h-1.5 rounded-full bg-cyber-cyan" />
+                  <span className="text-gray-500 mr-1">{log.timestamp}</span> {log.message}
+                </div>
+              ))}
               <div className="relative pt-1 border-t border-white/5">
                 <span className="absolute -left-[20.5px] top-2.5 w-1.5 h-1.5 rounded-full bg-cyber-purple animate-pulse" />
-                <span className="text-cyber-purple font-bold">Scanning</span> Ticker sensor active
+                <span className="text-cyber-purple font-bold">{nextCycleLabel}</span>
               </div>
             </div>
           </GlassCard>
         </div>
 
-        {/* Column 3: Policy, Profile, Source Trust, Graph Preview */}
+        {/* Column 3: Persona, policy, memory, source health, runtime */}
         <div className="lg:col-span-1 space-y-4">
-          {/* Persona Card (Enhanced with custom live focus status!) */}
+          {/* Persona Card */}
           <GlassCard className="p-4" glowColor="purple">
             <div className="flex items-center gap-3 border-b border-white/5 pb-2 mb-2">
               <div className="w-7 h-7 rounded-full bg-cyber-purple/10 flex items-center justify-center border border-cyber-purple/20">
@@ -632,17 +571,15 @@ export const DashboardOverview: React.FC = () => {
 
             <div className="space-y-1.5 text-[9px] font-mono leading-relaxed text-gray-400">
               <div><strong className="text-white uppercase font-display text-[8px]">Mission:</strong> {config.mission}</div>
-              
-              {/* Dynamic Live Status */}
+
               <div className="border-t border-white/5 pt-2 mt-2 space-y-1 text-gray-300 font-mono">
                 <div className="flex justify-between text-[8px] uppercase tracking-wider text-gray-500">
-                  <span>Live Agent Status</span>
-                  <span className="text-cyber-cyan animate-pulse">● Active Work</span>
+                  <span>Agent Status</span>
+                  <span className="text-cyber-cyan">{status}</span>
                 </div>
                 <div><span className="text-cyber-cyan">Current Focus:</span> {novaLiveFocus.focus}</div>
                 <div><span className="text-cyber-cyan">Current Goal:</span> {novaLiveFocus.goal}</div>
                 <div><span className="text-cyber-cyan">Current Reasoning:</span> {novaLiveFocus.reasoning}</div>
-                <div><span className="text-cyber-cyan">Est. Completion:</span> {status !== 'idle' ? `${novaLiveFocus.estimatedCompletionSeconds}s` : "N/A"}</div>
               </div>
 
               <div className="grid grid-cols-2 gap-2 border-t border-white/5 pt-1.5 mt-1.5 text-[8px] uppercase tracking-wider">
@@ -654,324 +591,142 @@ export const DashboardOverview: React.FC = () => {
             </div>
           </GlassCard>
 
-          {/* Editorial Policy Card */}
+          {/* Editorial Policy Card — real engine thresholds */}
           <GlassCard className="p-4" glowColor="none">
             <h4 className="font-display text-xs font-bold tracking-wider text-white uppercase border-b border-white/5 pb-2 mb-2">
-              Editorial Policy Heuristics
+              Editorial Policy Thresholds
             </h4>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 font-mono text-[9px] text-gray-400 mb-2">
               <div className="flex justify-between border-b border-white/2 pb-1">
-                <span>Min Credibility:</span>
-                <span className="text-white">{heuristics.cred}</span>
+                <span>Publish at:</span>
+                <span className="text-cyber-emerald">≥ {editorialThresholds.publish}/100</span>
               </div>
               <div className="flex justify-between border-b border-white/2 pb-1">
-                <span>Min Eng. Impact:</span>
-                <span className="text-white">{heuristics.impact}</span>
+                <span>Reject below:</span>
+                <span className="text-cyber-red">&lt; {editorialThresholds.reject}/100</span>
               </div>
               <div className="flex justify-between border-b border-white/2 pb-1">
-                <span>Min Novelty:</span>
-                <span className="text-white">{heuristics.novelty}</span>
+                <span>Daily post cap:</span>
+                <span className="text-white">{editorialThresholds.dailyCap}</span>
               </div>
               <div className="flex justify-between border-b border-white/2 pb-1">
-                <span>Memory match max:</span>
-                <span className="text-white">{heuristics.match}</span>
+                <span>Routine interval:</span>
+                <span className="text-white">{editorialThresholds.routineIntervalMinutes}m</span>
               </div>
             </div>
             <div className="text-[8px] text-gray-500 font-mono uppercase tracking-widest leading-relaxed">
-              Rejecting filter: <strong className="text-cyber-red font-normal">{heuristics.filters}</strong>
+              Rejecting filter: <strong className="text-cyber-red font-normal">duplicate canonical URL · title match · unsupported claims · low-quality marketing · persona exclusions</strong>
             </div>
           </GlassCard>
 
-          {/* Memory Logic Audit Card */}
+          {/* Memory card — real durable memory */}
           <GlassCard className="p-4" glowColor="cyan">
             <h4 className="font-display text-xs font-bold tracking-wider text-white uppercase border-b border-white/5 pb-2 mb-2">
-              Memory Deduplication Engine
+              Durable Editorial Memory
             </h4>
             <div className="space-y-1.5 font-mono text-[9px] text-gray-400">
               <div className="flex justify-between">
-                <span>Today&apos;s Active Topic:</span>
-                <span className="text-white truncate max-w-[120px]">DeepSeek-V3 MLA</span>
+                <span>Memory entries:</span>
+                <span className="text-white">{memoryEntries.length}</span>
               </div>
               <div className="flex justify-between">
-                <span>Compared database size:</span>
-                <span className="text-white">{memoryNodes.length > 0 ? memoryNodes.length : 18} Node Records</span>
+                <span>Published posts:</span>
+                <span className="text-white">{realPosts.length}</span>
               </div>
               <div className="flex justify-between">
-                <span>Similarity Probability:</span>
-                <span className="text-cyber-cyan">{10 + (posts.length % 15)}%</span>
+                <span>Duplicate check order:</span>
+                <span className="text-cyber-cyan text-right max-w-[160px]">canonical URL → title hash → keyword overlap → semantic</span>
               </div>
               <div className="flex justify-between">
-                <span>Deduplication Verdict:</span>
-                <span className="text-cyber-emerald font-bold uppercase">
-                  {status === 'filtering' ? 'AUDITING...' : 'Unique (Approved)'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Knowledge Graph updated:</span>
-                <span className="text-cyber-cyan font-bold uppercase">{posts.length > 0 ? "YES" : "NO"}</span>
+                <span>Memory scope:</span>
+                <span className="text-cyber-emerald font-bold uppercase">Durable (SQLite)</span>
               </div>
             </div>
           </GlassCard>
 
-          {/* Source Trust Panel */}
+          {/* Source Health (real) */}
           <GlassCard className="p-4" glowColor="none">
-            <h4 className="font-display text-xs font-bold tracking-wider text-white uppercase border-b border-white/5 pb-2 mb-2">
-              Source Trust Ratings
-            </h4>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[9px] text-gray-400">
-              {trustRatings.map((rating, idx) => (
-                <div key={idx} className="flex justify-between">
-                  <span>{rating.label}</span>
-                  <span className="text-cyber-cyan font-bold">{rating.val}</span>
+            <div className="flex items-center justify-between border-b border-white/5 pb-2 mb-2">
+              <h4 className="font-display text-xs font-bold tracking-wider text-white uppercase">
+                Source Health
+              </h4>
+              <button
+                onClick={() => setActiveTab('sources')}
+                className="text-[8px] font-mono uppercase tracking-widest text-cyber-cyan hover:underline cursor-pointer"
+              >
+                View all
+              </button>
+            </div>
+            <div className="space-y-1.5 font-mono text-[9px] text-gray-400">
+              {sourceHealth.length === 0 && (
+                <p className="text-[10px] text-gray-600 text-center py-3">No source fetches recorded</p>
+              )}
+              {sourceHealth.slice(0, 6).map(source => (
+                <div key={source.sourceName} className="flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", source.status === 'success' ? "bg-cyber-emerald" : "bg-cyber-red animate-pulse")} />
+                    <span className="truncate">{source.sourceName}</span>
+                  </span>
+                  <span className="text-gray-500 flex-shrink-0">{timeAgo(source.fetchedAt)} · {source.itemCount ?? '—'}</span>
                 </div>
               ))}
             </div>
           </GlassCard>
 
-          {/* Mini Knowledge Graph Preview */}
+          {/* Mini Knowledge Graph — real memory subjects */}
           <GlassCard className="p-4" glowColor="cyan">
             <h4 className="font-display text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-2 flex items-center gap-1">
               <Database className="w-3.5 h-3.5 text-cyber-cyan" />
-              Graph Node Preview
+              Durable Memory Subjects
             </h4>
-            
-            <div className="rounded border border-white/5 bg-black/60 p-2 text-center h-[90px] flex items-center justify-center">
-              <svg viewBox="0 0 280 80" className="w-full h-full">
-                <path d="M 30 40 L 70 40 L 110 40 L 150 40 L 190 40 L 230 40" stroke="rgba(0, 240, 255, 0.2)" strokeWidth="1" strokeDasharray="2 2" />
-                <circle cx="30" cy="40" r="4" fill="#3b82f6" />
-                <text x="30" y="55" textAnchor="middle" fill="rgba(255, 255, 255, 0.4)" fontSize="6" fontFamily="var(--font-mono)">{graphLabels[0] || "Observe"}</text>
 
-                <circle cx="80" cy="30" r="4" fill="#a855f7" />
-                <text x="80" y="20" textAnchor="middle" fill="rgba(255, 255, 255, 0.4)" fontSize="6" fontFamily="var(--font-mono)">{graphLabels[1] || "Reason"}</text>
-
-                <circle cx="130" cy="50" r="4" fill="#ea580c" />
-                <text x="130" y="65" textAnchor="middle" fill="rgba(255, 255, 255, 0.4)" fontSize="6" fontFamily="var(--font-mono)">{graphLabels[2] || "Memory"}</text>
-
-                <circle cx="180" cy="30" r="4" fill="#00f0ff" />
-                <text x="180" y="20" textAnchor="middle" fill="rgba(255, 255, 255, 0.4)" fontSize="6" fontFamily="var(--font-mono)">{graphLabels[3] || "Inference"}</text>
-
-                <circle cx="230" cy="40" r="4" fill="#10b981" />
-                <text x="230" y="55" textAnchor="middle" fill="rgba(255, 255, 255, 0.4)" fontSize="6" fontFamily="var(--font-mono)">Index</text>
-              </svg>
-            </div>
+            {memoryEntries.length === 0 ? (
+              <div className="rounded border border-white/5 bg-black/60 p-3 text-center font-mono text-[9px] text-gray-600">
+                No memory entries yet
+              </div>
+            ) : (
+              <div className="rounded border border-white/5 bg-black/60 p-2 text-center h-[110px] flex items-center justify-center">
+                <svg viewBox="0 0 280 90" className="w-full h-full">
+                  <path d="M 30 45 L 90 45 L 150 45 L 210 45 L 250 45" stroke="rgba(0, 240, 255, 0.2)" strokeWidth="1" strokeDasharray="2 2" />
+                  {memoryEntries.slice(0, 5).map((entry, i) => {
+                    const x = 30 + i * 60;
+                    const y = 45 + (i % 2 === 0 ? -10 : 10);
+                    return (
+                      <g key={entry.id}>
+                        <circle cx={x} cy={y} r="4" fill={i % 2 === 0 ? '#3b82f6' : '#a855f7'} />
+                        <text x={x} y={y + (i % 2 === 0 ? 16 : -10)} textAnchor="middle" fill="rgba(255, 255, 255, 0.45)" fontSize="6" fontFamily="var(--font-mono)">
+                          {entry.subject.slice(0, 12)}
+                        </text>
+                      </g>
+                    );
+                  })}
+                  {memoryEntries.length > 5 && (
+                    <text x="255" y="50" textAnchor="middle" fill="rgba(0, 240, 255, 0.6)" fontSize="7" fontFamily="var(--font-mono)">
+                      +{memoryEntries.length - 5}
+                    </text>
+                  )}
+                </svg>
+              </div>
+            )}
           </GlassCard>
 
           {/* Agent Runtime status */}
           <GlassCard className="p-4" glowColor="none">
             <h4 className="font-display text-[9px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/5 pb-2 mb-2">
-              Agent Runtime status
+              Engine Runtime
             </h4>
             <div className="font-mono text-[9px] text-gray-400 space-y-1">
-              <div className="flex justify-between"><span>Status:</span><span className="text-cyber-cyan font-bold uppercase animate-pulse">{getHumanizedStatus(status)}</span></div>
-              <div className="flex justify-between"><span>Last Scan sweep:</span><span className="text-white">{secondsSinceLastScan} seconds ago</span></div>
-              <div className="flex justify-between"><span>Topics in queue:</span><span className="text-white">{discoveredTopics.length} items</span></div>
-              <div className="flex justify-between"><span>Next publication block:</span><span className="text-cyber-cyan font-bold">{nextPublishCountdown}</span></div>
+              <div className="flex justify-between"><span>Status:</span><span className="text-cyber-cyan font-bold uppercase">{status}</span></div>
+              <div className="flex justify-between"><span>Last scan:</span><span className="text-white">{secondsSinceLastScan} seconds ago</span></div>
+              <div className="flex justify-between"><span>Memory nodes (sim):</span><span className="text-white">{memoryNodes.length}</span></div>
+              <div className="flex justify-between"><span>Next publication (sim):</span><span className="text-cyber-cyan font-bold">{nextPublishCountdown}</span></div>
             </div>
           </GlassCard>
         </div>
       </div>
 
-      {/* 6. Decision Replay Side Drawer Modal (Enhanced with cascading stagger and scorecard explainers!) */}
-      <AnimatePresence>
-        {selectedPostForDrawer && (
-          <div className="fixed inset-0 z-50 flex justify-end bg-black/70 backdrop-blur-sm">
-            {/* Click outside to close */}
-            <div className="absolute inset-0" onClick={() => setSelectedPostForDrawer(null)} />
-            
-            <motion.div
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "tween", duration: 0.3 }}
-              className="w-full max-w-md bg-[#0b0f19] border-l border-white/10 h-full p-6 relative overflow-y-auto z-10 flex flex-col justify-between"
-            >
-              <div className="space-y-5">
-                <div className="flex justify-between items-start border-b border-white/10 pb-4 mb-2">
-                  <div>
-                    <h3 className="font-display text-sm font-bold text-cyber-cyan uppercase tracking-wider">
-                      Decision Replay Logs
-                    </h3>
-                    <p className="text-[8px] text-gray-500 font-mono uppercase tracking-widest mt-0.5">
-                      {selectedPostForDrawer.publicationId} • Complete reasoning timeline
-                    </p>
-                  </div>
-                  <button 
-                    onClick={() => setSelectedPostForDrawer(null)}
-                    className="p-1 rounded bg-white/5 text-gray-400 hover:text-white transition-colors cursor-pointer"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <span className="text-[8px] text-gray-500 font-mono uppercase tracking-widest font-bold">Audited Headline</span>
-                    <h2 className="font-display text-xs font-bold text-white uppercase tracking-wide leading-relaxed mt-1">
-                      {selectedPostForDrawer.title}
-                    </h2>
-                  </div>
-
-                  {/* Flow Steps with Staggered Visual Cascading */}
-                  <motion.div 
-                    variants={containerVariants}
-                    initial="hidden"
-                    animate="show"
-                    className="space-y-3.5 relative before:absolute before:left-3 before:top-2 before:bottom-2 before:w-[1px] before:bg-cyber-cyan/20 pl-7 font-mono text-[9.5px] text-gray-400"
-                  >
-                    <motion.div variants={itemVariants} className="relative">
-                      <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white font-bold">✓</span>
-                      <span className="text-gray-500 mr-1.5">09:00</span> <span className="text-white font-semibold">Topic Discovered</span>
-                    </motion.div>
-                    
-                    <motion.div variants={itemVariants} className="relative pl-3 border-l border-white/5 text-gray-500 text-[8px] leading-relaxed">
-                      Sourced from streams: <span className="text-cyber-cyan font-bold">OpenAI</span> • <span className="text-cyber-cyan font-bold">GitHub</span> • <span className="text-cyber-cyan font-bold">arXiv</span>
-                    </motion.div>
-
-                    <motion.div variants={itemVariants} className="relative">
-                      <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Credibility Analysis:</span> <strong className="text-white">97% score</strong>
-                    </motion.div>
-
-                    <motion.div variants={itemVariants} className="relative">
-                      <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Competitor Audit:</span> Compared against <strong className="text-white">23 competing topics</strong>
-                    </motion.div>
-
-                    <motion.div variants={itemVariants} className="relative">
-                      <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Memory Comparison:</span> Scanned <strong className="text-white">18 previous publications</strong>
-                    </motion.div>
-
-                    <motion.div variants={itemVariants} className="relative pl-3 border-l border-white/5 text-gray-500 text-[8px] leading-relaxed">
-                      Duplicate similarity score: <strong className="text-cyber-emerald">12% probability</strong>
-                    </motion.div>
-
-                    <motion.div variants={itemVariants} className="relative">
-                      <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Novelty Score:</span> Rated at <strong className="text-white">{selectedPostForDrawer.noveltyScore}%</strong>
-                    </motion.div>
-
-                    <motion.div variants={itemVariants} className="relative">
-                      <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Engineering Impact:</span> Scored <strong className="text-cyber-cyan">{selectedPostForDrawer.importanceScore}/100</strong>
-                    </motion.div>
-
-                    <motion.div variants={itemVariants} className="relative">
-                      <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Editorial Policy:</span> <strong className="text-cyber-emerald">PASS (Pure Tech)</strong>
-                    </motion.div>
-
-                    <motion.div variants={itemVariants} className="relative">
-                      <span className="absolute -left-[27px] top-1 w-2.5 h-2.5 rounded-full bg-blue-500/25 border border-blue-400 flex items-center justify-center text-[6px] text-white">✓</span>
-                      <span className="text-gray-500">Publishing Confidence:</span> <strong className="text-white">96% score</strong>
-                    </motion.div>
-
-                    <motion.div variants={itemVariants} className="relative font-bold text-cyber-cyan">
-                      <span className="absolute -left-[27px] top-1.5 w-2.5 h-2.5 rounded-full bg-cyber-cyan border border-cyber-cyan flex items-center justify-center text-[6px] text-black font-bold">✓</span>
-                      Final Decision: <strong className="text-cyber-cyan">APPROVED</strong>
-                    </motion.div>
-
-                    <motion.div variants={itemVariants} className="relative text-cyber-purple font-bold">
-                      <span className="absolute -left-[27px] top-1.5 w-2.5 h-2.5 rounded-full bg-cyber-purple border border-cyber-purple flex items-center justify-center text-[6px] text-white font-bold">✓</span>
-                      Knowledge Graph Updated: YES
-                    </motion.div>
-                  </motion.div>
-
-                  {/* Detailed Scorecard Explainability */}
-                  <div className="border-t border-white/10 pt-4 space-y-3 font-mono text-[9px]">
-                    <span className="text-white block font-display uppercase tracking-widest font-bold">Decision Explainability Scorecard</span>
-                    
-                    <div className="space-y-2 max-h-[160px] overflow-y-auto pr-1">
-                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
-                        <div className="flex justify-between font-bold">
-                          <span>Engineering Impact:</span>
-                          <span className="text-cyber-cyan">{selectedPostForDrawer.importanceScore}%</span>
-                        </div>
-                        <p className="text-[8px] text-gray-500 leading-normal">
-                          Measures the technical architecture depth and practical codebase applicability.
-                        </p>
-                      </div>
-
-                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
-                        <div className="flex justify-between font-bold">
-                          <span>Novelty Index:</span>
-                          <span className="text-cyber-cyan">{selectedPostForDrawer.noveltyScore}%</span>
-                        </div>
-                        <p className="text-[8px] text-gray-500 leading-normal">
-                          Assesses the uniqueness of this research against all previously indexed publications.
-                        </p>
-                      </div>
-
-                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
-                        <div className="flex justify-between font-bold">
-                          <span>Credibility Score:</span>
-                          <span className="text-white">97%</span>
-                        </div>
-                        <p className="text-[8px] text-gray-500 leading-normal">
-                          Evaluates the authority of source streams and commit integrity logs.
-                        </p>
-                      </div>
-
-                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
-                        <div className="flex justify-between font-bold">
-                          <span>Memory Similarity:</span>
-                          <span className="text-cyber-emerald">12%</span>
-                        </div>
-                        <p className="text-[8px] text-gray-500 leading-normal">
-                          Quantifies overlap probability with our historical document indices.
-                        </p>
-                      </div>
-
-                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
-                        <div className="flex justify-between font-bold">
-                          <span>Editorial Policy Match:</span>
-                          <span className="text-cyber-emerald">100%</span>
-                        </div>
-                        <p className="text-[8px] text-gray-500 leading-normal">
-                          Verifies conformity to our zero-hype, pure systems engineering criteria.
-                        </p>
-                      </div>
-
-                      <div className="p-2 rounded bg-black/35 border border-white/5 space-y-1">
-                        <div className="flex justify-between font-bold">
-                          <span>Publishing Confidence:</span>
-                          <span className="text-white">96%</span>
-                        </div>
-                        <p className="text-[8px] text-gray-500 leading-normal">
-                          Calculated joint likelihood of editorial merit and audience relevancy.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Why Not This competing option */}
-                  <div className="border-t border-white/10 pt-4 font-mono text-[9px] space-y-2">
-                    <span className="text-white block font-display uppercase tracking-widest font-bold">Why Not This? Competing Audit</span>
-                    <div className="p-3 rounded border border-cyber-red/20 bg-cyber-red/5 space-y-1">
-                      <div className="flex justify-between text-[8px] text-cyber-red">
-                        <span>Rejected Competing Alternative</span>
-                        <span>Outside Editorial Policy</span>
-                      </div>
-                      <div className="text-white font-semibold truncate">
-                        {selectedPostForDrawer.category === 'Agentic AI' ? "Autonomous Agent Meme Redirection Engine" : "Consumer AI Gadget Launch & Funding Announcements"}
-                      </div>
-                      <p className="text-[8.5px] text-gray-500 leading-relaxed pt-1">
-                        {selectedPostForDrawer.category === 'Agentic AI' 
-                          ? "Rejected because it is consumer marketing trends with limited technical engineering significance." 
-                          : "Rejected as consumer product fluff rather than technical systems architecture breakthrough."}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-white/10 mt-6 text-center text-[8px] font-mono text-gray-500 uppercase tracking-widest">
-                Aethra reasoning engine signature verified
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* Decision Drawer */}
+      <DecisionDrawer open={drawerItem != null} onClose={() => setDrawerItem(null)} item={drawerItem} />
     </div>
   );
 };
