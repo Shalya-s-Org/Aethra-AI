@@ -2768,3 +2768,6 @@ my agent won't initialize, pls fix
 ## Prompt 44
 I am being shown this error: ⚠
 Initialization failed: Failed to initialize agent.
+
+## Prompt 45
+I'm hosting this project on vercel- error shown now is Initialization failed: Failed to initialize agent: ENOENT: no such file or directory, mkdir '/var/task/.data' and ensure everything is working on vercel deployment

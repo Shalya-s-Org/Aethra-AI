@@ -3,6 +3,7 @@ import { isSafeAgentId, peekAgentState } from '../../../../lib/agentEngine';
 
 // Always serve live state — never cached.
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 // PURE READ: this route never advances the pipeline and never schedules work.
 // Recurring work is driven only by the external cron (POST /api/cron/run) or

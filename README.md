@@ -116,6 +116,18 @@ Recurring work is durable and driven **only** by an external scheduler — no `s
 
 **Deployment target.** The default deployment uses the app's durable SQLite database, which requires a persistent, writable filesystem — a single always-on Linux host (VM/VPS/container). Vercel serverless functions cannot host SQLite (read-only filesystem, ephemeral `/tmp`; see Known operational limits). For a shared, multi-instance or serverless deployment, set `AETHRA_STORAGE=postgres` with `DATABASE_URL`; the Postgres driver implements the same schema, transactions, unique constraints, and job leases (see `src/lib/storage`), though the synchronous DAO layer is still SQLite-only (documented in Known operational limits). A committed, deployment-ready systemd configuration ships in [`deploy/`](deploy/): `aethra-web.service` serves the app, and the `aethra-cron.timer` fires `aethra-cron.service` every 15 minutes, which invokes `POST /api/cron/run` **securely** — the secret from the environment file is sent as `Authorization: Bearer <secret>`, and the route rejects requests without it.
 
+### Vercel deployment
+
+Vercel mounts `/var/task` read-only. The SQLite driver detects Vercel and
+uses `/tmp/aethra.db`, preventing `mkdir '/var/task/.data'` failures during
+agent initialization. `/tmp` is ephemeral and per-instance, so it is suitable
+for a preview/demo only; agent state can disappear after a cold start.
+
+`vercel.json` registers a daily cron call to `/api/cron/run`. Set a random
+`CRON_SECRET` in the Vercel Production environment; Vercel sends it as a
+Bearer authorization header. The route also accepts the existing
+`AETHRA_CRON_SECRET` for non-Vercel deployments.
+
 ### Deploy steps (Linux host)
 
 1. Copy the app to `/opt/aethra` and install:

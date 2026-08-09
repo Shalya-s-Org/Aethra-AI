@@ -3,6 +3,7 @@ import { getSchedulerHealth } from '../../../lib/db';
 
 // Always report live status — never cached.
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 // Public, read-only health: never triggers work and never writes. Lets an
 // operator (or an uptime monitor) confirm the external scheduler is healthy —
@@ -15,6 +16,9 @@ export async function GET() {
     return NextResponse.json({
       status: 'ok',
       db: 'ok',
+      persistence: process.env.VERCEL === '1' || process.env.VERCEL_ENV
+        ? 'ephemeral (Vercel /tmp SQLite; data resets on cold starts)'
+        : 'local SQLite',
       serverTime: new Date().toISOString(),
       agents: health.agents,
       jobs: { active: health.activeJobs, degraded: health.degradedJobs },
