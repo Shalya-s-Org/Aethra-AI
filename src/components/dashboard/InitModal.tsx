@@ -32,8 +32,9 @@ export const InitModal: React.FC<InitModalProps> = ({ isOpen, onClose }) => {
     setInitError(null);
     setIsActivating(true);
 
-    // Step-by-step activating states (initializeAgent performs the real
-    // POST /api/agent/init against the backend engine)
+    // Trigger backend initialization concurrently with visual boot steps
+    const initPromise = initializeAgent(formData);
+
     const steps = [
       "Compiling heuristic model weights...",
       "Injecting tone guidelines and editorial criteria...",
@@ -42,13 +43,11 @@ export const InitModal: React.FC<InitModalProps> = ({ isOpen, onClose }) => {
     ];
 
     for (let i = 0; i < steps.length; i++) {
-      await new Promise(resolve => setTimeout(resolve, 800));
+      await new Promise(resolve => setTimeout(resolve, 400));
       setActivationStep(i + 1);
     }
 
-    // Await the real init: on failure keep the modal open and show the
-    // backend's error instead of closing as if nothing happened.
-    const result = await initializeAgent(formData);
+    const result = await initPromise;
     if (!result.ok) {
       setInitError(result.error);
       setActivationStep(0);
