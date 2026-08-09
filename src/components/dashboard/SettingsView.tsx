@@ -10,10 +10,18 @@ export const SettingsView: React.FC = () => {
   const { config, initializeAgent, resetAgent } = useAgent();
   const [formData, setFormData] = useState<AgentConfig>({ ...config });
   const [isSaved, setIsSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    initializeAgent(formData);
+    setSaveError(null);
+    // Re-initialization with the updated persona; only report success when the
+    // backend actually accepted it.
+    const result = await initializeAgent(formData);
+    if (!result.ok) {
+      setSaveError(result.error);
+      return;
+    }
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 3000);
   };
@@ -41,6 +49,12 @@ export const SettingsView: React.FC = () => {
               <div className="flex items-center gap-1.5 text-cyber-emerald text-[10px] uppercase font-display tracking-widest font-bold">
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 Parameters updated
+              </div>
+            )}
+            {saveError && (
+              <div role="alert" className="flex items-center gap-1.5 text-red-400 text-[10px] uppercase font-display tracking-widest font-bold">
+                <ShieldAlert className="w-3.5 h-3.5" />
+                Save failed: {saveError}
               </div>
             )}
           </div>

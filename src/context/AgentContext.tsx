@@ -34,12 +34,15 @@ export interface PipelineStats {
   publishCount: number;
 }
 
+export type InitResult = { ok: true } | { ok: false; error: string };
+
 interface AgentContextType {
   // Config
   config: AgentConfig;
   isInitialized: boolean;
   agentId: string;
-  initializeAgent: (config: AgentConfig) => Promise<void>;
+  /** Report init success/failure so the UI can surface backend errors. */
+  initializeAgent: (config: AgentConfig) => Promise<InitResult>;
   resetAgent: () => void;
 
   // State
@@ -170,7 +173,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // the dashboard keeps it in memory for the session and sends it on reset.
   const [ownershipToken, setOwnershipToken] = useState<string | null>(null);
 
-  const initializeAgent = async (newConfig: AgentConfig) => {
+  const initializeAgent = async (newConfig: AgentConfig): Promise<InitResult> => {
     const previousId = agentId;
     const previousToken = ownershipToken;
     setHasLoadedSnapshot(false);
@@ -180,7 +183,19 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: { ...newConfig } })
       });
-      if (!res.ok) throw new Error("Backend initialization failed");
+      if (!res.ok) {
+        // Surface the backend's message when it provides one (validation 400s,
+        // oversized 413s, etc.) instead of failing silently.
+        let message = `Backend initialization failed (HTTP ${res.status}).`;
+        try {
+          const body = (await res.json()) as { error?: unknown };
+          if (typeof body.error === 'string' && body.error.length > 0) message = body.error;
+        } catch {
+          // non-JSON error body — keep the generic message
+        }
+        console.error("Could not register agent session on server:", message);
+        return { ok: false, error: message };
+      }
       const data = await res.json();
       const token = res.headers.get('x-agent-ownership-token');
       setOwnershipToken(token);
@@ -198,8 +213,11 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           headers: previousToken ? { 'x-agent-ownership-token': previousToken } : {}
         }).catch(() => {});
       }
+      return { ok: true };
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       console.error("Could not register agent session on server:", err);
+      return { ok: false, error: message };
     }
   };
 
