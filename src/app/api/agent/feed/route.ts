@@ -4,6 +4,7 @@ import { getPostsByAgent } from '../../../../lib/db';
 
 // Always serve live feed data — never cached.
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);

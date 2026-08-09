@@ -10,6 +10,8 @@ import {
   storeInitResponse
 } from '../../../../lib/db';
 
+export const runtime = 'nodejs';
+
 // The init payload is a small persona config; a tight cap blocks oversized-body
 // memory abuse while leaving generous room for legitimate mission strings.
 const MAX_BODY_BYTES = 16 * 1024;

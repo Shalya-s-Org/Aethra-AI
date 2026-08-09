@@ -17,14 +17,31 @@ export interface SqliteStorageOptions {
   dbPath?: string;
 }
 
+/**
+ * The Vercel application bundle at /var/task is read-only. A relative SQLite
+ * path must therefore be redirected to /tmp, the writable per-invocation
+ * filesystem. This makes the app runnable on Vercel, but /tmp is ephemeral
+ * and is neither shared between instances nor durable across cold starts.
+ */
+export function resolveSqliteDbPath(
+  env: Record<string, string | undefined> = process.env
+): string {
+  const configured = env.AETHRA_DB_PATH;
+  const onVercel = env.VERCEL === '1' || Boolean(env.VERCEL_ENV);
+  if (onVercel) {
+    if (configured && path.isAbsolute(configured) && configured.startsWith('/tmp/')) return configured;
+    return path.join('/tmp', 'aethra.db');
+  }
+  return configured || path.join(process.cwd(), '.data', 'aethra.db');
+}
+
 export class SqliteStorage implements StorageDriver {
   readonly kind = 'sqlite' as const;
   private db: DatabaseSync | null = null;
   private readonly dbPath: string;
 
   constructor(options: SqliteStorageOptions = {}) {
-    this.dbPath =
-      options.dbPath ?? (process.env.AETHRA_DB_PATH || path.join(process.cwd(), '.data', 'aethra.db'));
+    this.dbPath = options.dbPath ?? resolveSqliteDbPath();
   }
 
   /** The underlying synchronous handle — used only by the legacy DAO layer. */

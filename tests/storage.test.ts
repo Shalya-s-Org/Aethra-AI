@@ -9,7 +9,7 @@ const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'aethra-storage-test-'));
 const DB_PATH = path.join(TMP_DIR, 'storage.db');
 
 import { MIGRATIONS } from '../src/lib/storage/migrations';
-import { SqliteStorage } from '../src/lib/storage/sqlite';
+import { SqliteStorage, resolveSqliteDbPath } from '../src/lib/storage/sqlite';
 import { PostgresStorage } from '../src/lib/storage/postgres';
 import { createStorage } from '../src/lib/storage';
 
@@ -48,6 +48,17 @@ describe('migration registry', () => {
 });
 
 describe('SQLite driver', () => {
+  it('uses Vercel writable temporary storage instead of the read-only bundle', () => {
+    assert.equal(
+      resolveSqliteDbPath({ VERCEL: '1', AETHRA_DB_PATH: '.data/aethra.db' }),
+      path.join('/tmp', 'aethra.db')
+    );
+    assert.equal(
+      resolveSqliteDbPath({ VERCEL_ENV: 'production', AETHRA_DB_PATH: '/tmp/custom.db' }),
+      '/tmp/custom.db'
+    );
+  });
+
   it('applies all migrations on first use and is idempotent across reconnects', async () => {
     const driver = new SqliteStorage({ dbPath: DB_PATH });
     // First use: raw connection opens, migrations run.

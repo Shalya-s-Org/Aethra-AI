@@ -13,9 +13,12 @@ import { redactSecrets, timingSafeEqualString } from '../../../../lib/security';
 // so a plain browser request cannot trigger work either way.
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
-export async function POST(request: Request) {
-  const secret = process.env.AETHRA_CRON_SECRET;
+async function runCron(request: Request) {
+  // Vercel Cron uses GET and sends CRON_SECRET as a Bearer token. Retain
+  // AETHRA_CRON_SECRET for the existing Linux/systemd deployment.
+  const secret = process.env.CRON_SECRET ?? process.env.AETHRA_CRON_SECRET;
   if (secret) {
     const auth = request.headers.get('authorization') ?? '';
     // Constant-time comparison: never reveal timing or length information
@@ -41,8 +44,12 @@ export async function POST(request: Request) {
   }
 }
 
+export async function POST(request: Request) {
+  return runCron(request);
+}
+
 // GET is deliberately not a trigger: a scheduled run must never be started by
 // a page load or a prefetch.
-export async function GET() {
-  return NextResponse.json({ error: 'Method not allowed. POST only.' }, { status: 405 });
+export async function GET(request: Request) {
+  return runCron(request);
 }

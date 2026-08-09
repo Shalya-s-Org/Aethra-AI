@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { destroyAgent, isSafeAgentId } from '../../../lib/agentEngine';
 
+export const runtime = 'nodejs';
+
 // The ownership-token header: the credential minted at init and returned in
 // the `X-Agent-Ownership-Token` response header (never in the JSON body, so
 // the judged init/feed contract is unchanged). DELETE is the only
