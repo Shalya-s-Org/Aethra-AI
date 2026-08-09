@@ -16,7 +16,9 @@ Everything the UI shows comes from real persisted data. The judged API contract 
                         │ reads/writes     └───────────────┬───────────────┘
                         ▼                                  │
         ┌──────────────────────────────────────────────────▼──────────────┐
-        │              SQLite (durable, node:sqlite, WAL)                 │
+        │  Storage drivers (src/lib/storage) — one schema, two backends:  │
+        │  • SQLite (default, node:sqlite, WAL) — single always-on host   │
+        │  • Postgres (DATABASE_URL) — shared, multi-instance/serverless  │
         │  agents · posts · topics · sources · agent_runs                 │
         │  discovery_candidates · discovery_fetches · discovery_decisions │
         │  memory_entries · scheduled_jobs                                │
@@ -69,7 +71,9 @@ Copy `.env.example` to `.env` and fill in local values. Secrets live only in env
 
 | Variable | Purpose | Default |
 |---|---|---|
+| `AETHRA_STORAGE` | Storage driver: `sqlite` (default) or `postgres` (shared, multi-instance) | `sqlite` |
 | `AETHRA_DB_PATH` | SQLite database file (durable persistence) | `.data/aethra.db` |
+| `DATABASE_URL` | Postgres connection string — required when `AETHRA_STORAGE=postgres` | — |
 | `AETHRA_CRON_SECRET` | Bearer secret for `POST /api/cron/run` — **required in production**; when unset, `x-vercel-cron: 1` is required (local dev) | unset |
 | `AETHRA_LLM_PROVIDER` | `local` (deterministic, offline — the test provider) or `openai` | `local` |
 | `AETHRA_LLM_API_KEY` | Required when provider ≠ `local` | — |
@@ -101,7 +105,7 @@ curl -X POST -H "x-vercel-cron: 1" http://localhost:3000/api/cron/run
 
 Recurring work is durable and driven **only** by an external scheduler — no `setInterval`, no browser tab, no API GET. `POST /api/agent/init` writes the agent's recurring job row (`scheduled_jobs`); an external scheduler then invokes `POST /api/cron/run` (or the equivalent one-shot `npm run worker`) at the cadence, and each tick leases and runs every due occurrence.
 
-**Deployment target.** The app's durable SQLite database requires a persistent, writable filesystem, so it deploys to a single always-on Linux host (VM/VPS/container) — Vercel serverless functions cannot host it (read-only filesystem, ephemeral `/tmp`; see Known operational limits). A committed, deployment-ready systemd configuration ships in [`deploy/`](deploy/): `aethra-web.service` serves the app, and the `aethra-cron.timer` fires `aethra-cron.service` every 15 minutes, which invokes `POST /api/cron/run` **securely** — the secret from the environment file is sent as `Authorization: Bearer <secret>`, and the route rejects requests without it.
+**Deployment target.** The default deployment uses the app's durable SQLite database, which requires a persistent, writable filesystem — a single always-on Linux host (VM/VPS/container). Vercel serverless functions cannot host SQLite (read-only filesystem, ephemeral `/tmp`; see Known operational limits). For a shared, multi-instance or serverless deployment, set `AETHRA_STORAGE=postgres` with `DATABASE_URL`; the Postgres driver implements the same schema, transactions, unique constraints, and job leases (see `src/lib/storage`), though the synchronous DAO layer is still SQLite-only (documented in Known operational limits). A committed, deployment-ready systemd configuration ships in [`deploy/`](deploy/): `aethra-web.service` serves the app, and the `aethra-cron.timer` fires `aethra-cron.service` every 15 minutes, which invokes `POST /api/cron/run` **securely** — the secret from the environment file is sent as `Authorization: Bearer <secret>`, and the route rejects requests without it.
 
 ### Deploy steps (Linux host)
 
@@ -173,10 +177,11 @@ The automated assertions (`tests/evaluation.test.ts`) verify: every scheduled oc
 | Accelerated 48-hour simulation (cadence + full pipeline) | `tests/jobs.test.ts`, `tests/evaluation.test.ts` |
 | Bounded persisted state (no unbounded growth across many runs) | `tests/engine.test.ts` |
 | Scheduler health (last cron run, next due) + cron webhook auth | `tests/health.test.ts` |
+| Storage drivers (migrations, transactions, restart survival, lease claims; Postgres-gated) | `tests/storage.test.ts` |
 
 ## Known operational limits
 
-- **Single-node SQLite** — durable and crash-safe (WAL, busy timeout, foreign keys) but not horizontally scalable; the lease model assumes one shared database. A production multi-region deployment would move to Postgres with the same table shapes. Consequently the app cannot run on Vercel serverless (read-only filesystem, ephemeral `/tmp`) — the committed scheduler targets a single always-on Linux host.
+- **SQLite is the DAO default; Postgres is the async-driver path** — the synchronous DAO layer (`src/lib/db.ts`) runs on the SQLite driver and fails fast if `AETHRA_STORAGE=postgres` is set (no silent split-brain). The Postgres driver implements the full `StorageDriver` interface — the same shared migration registry, transactions, unique constraints, and job leases — and is exercised by integration tests gated on `DATABASE_URL`, but the DAO has not yet been converted to the async interface, so an end-to-end Postgres deployment requires that conversion. Single-node SQLite is durable and crash-safe (WAL, busy timeout, foreign keys) but not horizontally scalable; the lease model assumes one shared database. The app therefore cannot run on Vercel serverless today (read-only filesystem, ephemeral `/tmp`) — the committed scheduler targets a single always-on Linux host.
 - **Health is scheduler-scoped** — `GET /api/health` reports the last successful cron tick and the next due job from `scheduled_jobs`; there is no per-tick audit trail of *failed* runs (a degraded job surfaces via `jobs.degraded` and `last_error`, not a run history).
 - **Persona-global pipeline** — the discovery/editorial pipeline is one Ada persona feeding all agent sessions; candidates and decisions carry no `agent_id`, and the once-only `published_post_id` guard prevents cross-agent duplicate publication. Per-persona isolation would require adding `agent_id` to `discovery_*` and scoping the editorial queries.
 - **In-memory agent session** — the dashboard's live session is in-memory; reloading re-initializes it. The durable records (posts, runs, jobs, decisions, memory) all survive restart.
