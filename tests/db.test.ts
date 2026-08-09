@@ -398,7 +398,7 @@ describe('memory + runs + cascade delete', () => {
     const runId = insertRun({ agentId, topicId: null, status: 'running', outcome: null, startedAtMs: T0 });
     updateRun(runId, { status: 'completed', finishedAtMs: T0 + 5000, outcome: 'published' });
 
-    assert.equal(getMemoryNodesByAgent(agentId).length, 3); // 2 seeds + 1
+    assert.equal(getMemoryNodesByAgent(agentId).length, 1); // persona_memory is written only by the legacy sim (test-only); no seed nodes
     const runs = getRunsByAgent(agentId);
     assert.equal(runs.length, 1);
     assert.equal(runs[0].status, 'completed');

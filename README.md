@@ -33,10 +33,10 @@ Everything the UI shows comes from real persisted data. The judged API contract 
                                                            │ per due job
         ┌──────────────────────────────────────────────────▼──────────────┐
         │  Agent cycle (src/lib/jobs/cycle.ts)                            │
-        │  1. advance sim for visualization (never publishes)             │
-        │  2. discovery: GitHub Advisories · CISA KEV · arXiv · labs      │
-        │  3. editorial: persona scoring → LLM generation → quality gate  │
-        │  4. publish gate-passed decisions transactionally (once-only)   │
+        │  1. discovery: GitHub Advisories · CISA KEV · arXiv · labs      │
+        │  2. editorial: persona scoring → LLM generation → quality gate  │
+        │  3. publish gate-passed decisions transactionally (once-only)   │
+        │  (the legacy sim stage machine never runs in production)        │
         └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -186,6 +186,7 @@ The automated assertions (`tests/evaluation.test.ts`) verify: every scheduled oc
 - **Health is scheduler-scoped** — `GET /api/health` reports the last successful cron tick and the next due job from `scheduled_jobs`; there is no per-tick audit trail of *failed* runs (a degraded job surfaces via `jobs.degraded` and `last_error`, not a run history).
 - **Per-agent editorial pipeline; shared discovery pool** — discovery fetches once per source into a global `discovery_candidates` pool (canonical-URL dedup), and each agent's cycle fans the pool out into its own `discovery_decisions` rows keyed by `(agent_id, candidate_id)`. Memory, rate limits, and dedup scope are per-agent; `markDecisionPublished` refuses to publish a decision the agent doesn't own, so no agent can publish another agent's decision. Agents with different domains resolve different personas from their own config.
 - **In-memory agent session** — the dashboard's live session is in-memory; reloading re-initializes it. The durable records (posts, runs, jobs, decisions, memory) all survive restart.
+- **Legacy sim engine is test-only** — the old stage-machine simulation (`advanceAgentById`/`advanceTo` in `src/lib/agentEngine.ts`) is never advanced in production: scheduled cycles run only the real discovery → editorial → publication pipeline, and the dashboard's activity readouts are derived from persisted records (`agent_runs`, posts, decisions, fetches, `memory_entries`). Seed **demo posts** are marked `is_demo` and excluded from the judged `GET /api/agent/feed`; no other fabricated content is seeded.
 - **Local LLM provider is the default** — deterministic and offline by design; the `openai` provider is a thin `/chat/completions` client behind the same schema-validation/repair path, but hasn't been evaluated for latency/cost under load.
 - **No embeddings** — the semantic-similarity duplicate ladder is keyword/token-based behind an interface; embeddings are the documented future seam, not an implemented backend.
 - **Quality-gate hold loop** — a gate-held draft is re-generated and re-gated on each run; with the deterministic local provider this loops harmlessly (the draft never changes), but with a real LLM it becomes a genuine revision loop.

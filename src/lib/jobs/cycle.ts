@@ -1,18 +1,20 @@
 // The agent cycle — what one scheduled occurrence does.
 //
-//  1. Advance the sim for visualization WITHOUT publishing (a scheduled run
-//     never publishes by itself).
-//  2. Discover fresh candidates for the persona (live sources; per-source
-//     isolation means individual source failures never abort the cycle).
-//  3. Run editorial: score, generate, and quality-gate the pending batch.
-//  4. Publish ONLY gate-passed, generated decisions — transactionally, with a
-//     per-decision idempotency key and a once-only published marker, so a
-//     re-delivered occurrence can never publish the same decision twice.
+//  1. Discover fresh candidates (live sources; per-source isolation means
+//     individual source failures never abort the cycle).
+//  2. Run editorial: score, generate, and quality-gate the agent's batch.
+//  3. Publish ONLY gate-passed, generated decisions — transactionally, with a
+//     per-decision idempotency key and a per-agent once-only published marker,
+//     so a re-delivered occurrence can never publish the same decision twice.
 //
 // Publication never happens "because a run occurred": an occurrence with no
 // gate-passed decisions publishes nothing.
+//
+// The legacy sim stage machine (src/lib/agentEngine advanceTo) is deliberately
+// NOT run here: it is a test-only artifact and no longer advances in
+// production. The dashboard's activity is derived from the real persisted
+// records this cycle writes (agent_runs, posts, decisions, fetches).
 
-import { advanceAgentById } from '../agentEngine';
 import {
   getPublishableDecisions,
   insertPost,
@@ -38,11 +40,6 @@ const TRANSIENT_PREFIX = 'TRANSIENT:';
 
 export function isTransientError(error: string): boolean {
   return error.startsWith(TRANSIENT_PREFIX);
-}
-
-/** Advance the sim for dashboard visualization without publishing. */
-function advanceSim(agentId: string, now: number): void {
-  advanceAgentById(agentId, now, { publish: false });
 }
 
 /** Publish every gate-passed, generated, not-yet-published decision for the
@@ -119,8 +116,6 @@ export function publishPublishablePosts(agentId: string, now: number): number {
 
 /** One scheduled occurrence for an agent. */
 export async function runAgentCycle(agentId: string, now: number, opts: CycleOptions = {}): Promise<CycleResult> {
-  advanceSim(agentId, now);
-
   // Discovery: live sources with per-source error isolation. A COMPLETE outage
   // (every allowlisted source failed) is a transient job failure — the queue
   // retries it with bounded exponential backoff.

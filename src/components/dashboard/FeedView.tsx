@@ -120,7 +120,7 @@ export const FeedView: React.FC = () => {
                       <div className="flex items-center gap-3">
                         {post.isDemo && (
                           <span className="px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/25 text-[8px] font-display uppercase tracking-wider">
-                            SIMULATION PREVIEW
+                            DEMO / SEED
                           </span>
                         )}
                         {post.confidence != null && (
