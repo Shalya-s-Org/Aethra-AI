@@ -266,4 +266,11 @@ export interface EngineMeta {
   nextPublishAt: number;
   lastDecisionAt: number;
   run: PipelineRun | null;
+  /**
+   * Secret ownership credential minted at init and returned to the caller in
+   * an `X-Agent-Ownership-Token` response header (never in the JSON body).
+   * Required to DELETE the agent; persisted in engine_json (internal — never
+   * serialized to the state/feed routes).
+   */
+  ownershipToken?: string;
 }

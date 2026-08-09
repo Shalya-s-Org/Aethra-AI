@@ -44,8 +44,9 @@ import { DEFAULT_DAILY_CAP, DEFAULT_ROUTINE_INTERVAL_MS } from './editorial/engi
 import { PUBLISH_THRESHOLD, REJECT_THRESHOLD } from './editorial/types';
 import { computeSourceStatus } from './discovery/health';
 import { sourceTypeRank } from './discovery/sourceTypes';
-import { ulid } from './ids';
+import { generateOwnershipToken, ulid } from './ids';
 import { linkRelatedPosts, recordMemoryForAccepted } from './memory';
+import { timingSafeEqualString } from './security';
 import { getPersona, validatePost } from './persona';
 import { canonicalizeSourceUrl } from './urls';
 
@@ -587,7 +588,11 @@ export function initializeAgentInstance(
     nextRunAt: now + demoScaledCadenceSeconds(frequency) * 1000,
     nextPublishAt: now + nextPublishResetSeconds(frequency) * 1000,
     lastDecisionAt: now - 12000, // -> lastDecisionTimeSeconds = 12
-    run: null
+    run: null,
+    // Secret ownership credential returned to the caller in an init response
+    // header; required to DELETE the agent (see destroyAgent). Persisted in
+    // engine_json only — never serialized to the client-facing state.
+    ownershipToken: generateOwnershipToken()
   };
 
   // Create the agent atomically: the row plus all seed content rows. A crash
@@ -861,9 +866,25 @@ export function peekAgentState(agentId: string, now: number = Date.now()): Backe
 }
 
 // Evict an agent durably (CASCADE removes its topics/sources/posts/decisions/
-// memory/runs). Idempotent: deleting a ghost is a no-op.
-export function destroyAgent(agentId: string): void {
+// memory/runs). Requires the ownership credential minted at init: agent ids
+// alone can never delete work. Returns false (caller maps to 404) when the
+// agent is unknown OR the token does not match — never distinguishing the two,
+// so a caller without the correct token learns nothing about existence.
+export function destroyAgent(agentId: string, ownershipToken: string): boolean {
+  const row = getAgentRow(agentId);
+  if (!row) return false;
+  const expected = row.engine.ownershipToken;
+  if (!expected || !timingSafeEqualString(ownershipToken, expected)) return false;
   deleteAgentRow(agentId);
+  return true;
+}
+
+/** The agent's ownership credential, for the init route to hand out (null
+ *  when the agent does not exist — pre-token rows cannot be deleted via the
+ *  API and must be removed by an operator). */
+export function getOwnershipToken(agentId: string): string | null {
+  const row = getAgentRow(agentId);
+  return row?.engine.ownershipToken ?? null;
 }
 
 // Expose memory lookup for tests/audit.

@@ -8,6 +8,7 @@ import type { LlmProvider, LlmProviderResult } from './types';
 import type { PersonaWritingPatterns } from '../persona';
 import { getPersona } from '../persona';
 import { jaccard, tokenize } from '../memory/similarity';
+import { redactSecrets } from '../security';
 
 const IDENTIFIER_RE = /\b(CVE-\d{4}-\d{4,}|GHSA-[0-9A-Za-z-]{4,}|arxiv\.org\/abs\/\d{4}\.\d{4,})\b/gi;
 
@@ -255,7 +256,9 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       });
       if (!res.ok) {
         const detail = (await res.text()).slice(0, 200);
-        return { ok: false, error: `LLM API ${res.status}: ${detail}` };
+        // The API detail may echo request/config internals; redact before it
+        // reaches a decision's persisted failure text.
+        return { ok: false, error: `LLM API ${res.status}: ${redactSecrets(detail)}` };
       }
       const data = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }> };
       const content = data.choices?.[0]?.message?.content;
@@ -264,7 +267,7 @@ export class OpenAiCompatibleProvider implements LlmProvider {
       }
       return { ok: true, raw: content };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = redactSecrets(err instanceof Error ? err.message : String(err));
       return { ok: false, error: `LLM request failed: ${message}` };
     } finally {
       clearTimeout(timer);

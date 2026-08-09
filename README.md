@@ -57,7 +57,9 @@ Safety properties of the orchestration layer (see `src/lib/jobs/queue.ts`):
 { "persona": { "name": "Ada", "domain": "ai-security" } }
 ```
 
-Optional advanced persona fields: `role`, `mission`, `frequency`, `style`. Responses are `{ agentId, status, message, timestamp }` with a stable opaque ULID `agentId`. Content-type must be `application/json` (415 otherwise), bodies are size-capped (413), unknown fields are rejected (400), and an `Idempotency-Key` header makes initialization concurrency-safe and replay-identical.
+Optional advanced persona fields: `role`, `mission`, `frequency`, `style`. Responses are `{ agentId, status, message, timestamp }` with a stable opaque ULID `agentId`. Content-type must be `application/json` (415 otherwise), bodies are size-capped (413), unknown fields are rejected (400), and an `Idempotency-Key` header makes initialization concurrency-safe and replay-identical. Each init also issues an **`X-Agent-Ownership-Token` response header** (192-bit, never in the JSON body) — the credential required to `DELETE /api/agent`; an agent id alone (public via the feed/state URLs) can never delete an agent, and replays return the same token.
+
+`DELETE /api/agent?agentId=` — requires the ownership token from init in the `X-Agent-Ownership-Token` header (constant-time compared). Missing token → 401; unknown agent or wrong token → uniform 404 (no existence oracle); success → `{ status: "evicted", agentId }`.
 
 `GET /api/agent/feed?agentId=`
 
@@ -203,7 +205,8 @@ Replay also proves the runner never requests an un-allowlisted URL: anything out
 | Pre-publication quality gate (all checks, incl. concrete-recommendation + repetitive-framing) | `tests/quality.test.ts` |
 | Accelerated 48-hour simulation (cadence + full pipeline) | `tests/jobs.test.ts`, `tests/evaluation.test.ts` |
 | Bounded persisted state (no unbounded growth across many runs) | `tests/engine.test.ts` |
-| Scheduler health (last cron run, next due) + cron webhook auth | `tests/health.test.ts` |
+| Scheduler health (last cron run, next due) + cron webhook auth (timing-safe secret compare) | `tests/health.test.ts` |
+| Security: ownership-token deletion, prompt injection, SSRF allowlist, malformed LLM output, malicious feed content, secret redaction | `tests/security.test.ts` |
 | Storage drivers (migrations, transactions, restart survival, lease claims; Postgres-gated) | `tests/storage.test.ts` |
 
 ## Known operational limits
@@ -215,5 +218,6 @@ Replay also proves the runner never requests an un-allowlisted URL: anything out
 - **Legacy sim engine is test-only** — the old stage-machine simulation (`advanceAgentById`/`advanceTo` in `src/lib/agentEngine.ts`) is never advanced in production: scheduled cycles run only the real discovery → editorial → publication pipeline, and the dashboard's activity readouts are derived from persisted records (`agent_runs`, posts, decisions, fetches, `memory_entries`). Seed **demo posts** are marked `is_demo` and excluded from the judged `GET /api/agent/feed`; no other fabricated content is seeded.
 - **Provider resolution is auto** — unset resolves to `openai` when `AETHRA_LLM_API_KEY` is present or `NODE_ENV=production` (no key in production → failing provider, nothing weak published); otherwise `local` (deterministic, offline). The `openai` provider is a thin `/chat/completions` client behind the same schema-validation/repair path, but hasn't been evaluated for latency/cost under load. The local provider varies openings by selecting among Ada's **approved writing patterns** and avoiding recent openings, so even offline output isn't byte-identical templates.
 - **Semantic detection is optional and degraded-safe** — the duplicate ladder always runs its deterministic checks first (canonical URL → normalized title → keyword/topic overlap); the embeddings step (level 4) only adds a finding when real vectors exist. Vectors are cached durably per agent/persona scope (`embeddings` table); a missing key, an unavailable endpoint, or an embed failure degrades per-item to the deterministic lexical provider — never a crash, never a semantic override of a stronger finding. `AETHRA_SIMILARITY=lexical` disables it outright.
+- **Secret handling** — credentials live only in environment variables; the cron secret and agent ownership tokens are compared constant-time (sha256 + `timingSafeEqual`); error strings are redacted (`sk-…`, `Bearer …`, `api_key=…`, `AETHRA_*=…`) before they reach logs, persisted `last_error` fields, or API responses; and the cron route never echoes raw failure internals to callers.
 - **Quality-gate hold loop** — a gate-held draft is re-generated and re-gated on each run; with the deterministic local provider this loops harmlessly (the draft never changes), but with a real LLM it becomes a genuine revision loop.
 - **Rate-limit cadence** — the routine interval (6h) and daily cap (4/24h) are editorial constants; a deployment tuning them must restart the editorial engine or make them configurable.

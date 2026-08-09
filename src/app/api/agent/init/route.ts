@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { initializeAgentInstance } from '../../../../lib/agentEngine';
+import { getOwnershipToken, initializeAgentInstance } from '../../../../lib/agentEngine';
+import { redactSecrets } from '../../../../lib/security';
 import { scheduleAgentJob } from '../../../../lib/jobs/schedule';
 import { validateInitRequest } from '../../../../lib/initSchema';
 import {
@@ -27,6 +28,19 @@ function isJsonContentType(contentType: string | null): boolean {
   if (!contentType) return false;
   const mediaType = contentType.split(';')[0].trim().toLowerCase();
   return mediaType === 'application/json' || mediaType === 'text/json' || mediaType.endsWith('+json');
+}
+
+// The ownership credential is delivered in a response HEADER — never in the
+// JSON body — so the judged init contract (exactly agentId/status/message/
+// timestamp) is byte-for-byte unchanged. Replays re-derive it from the stored
+// agent row so an idempotent retry returns the same credential.
+const OWNERSHIP_TOKEN_HEADER = 'x-agent-ownership-token';
+
+function initHeaders(agentId: string): HeadersInit {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = getOwnershipToken(agentId);
+  if (token) headers[OWNERSHIP_TOKEN_HEADER] = token;
+  return headers;
 }
 
 export async function POST(request: Request) {
@@ -79,10 +93,10 @@ export async function POST(request: Request) {
 
     const stored = getInitResponse(idempotencyKey);
     if (stored && stored.responseJson !== '') {
-      // Replay the original response exactly (same body + status).
+      // Replay the original response exactly (same body + status + token).
       return new NextResponse(stored.responseJson, {
         status: stored.status,
-        headers: { 'Content-Type': 'application/json' }
+        headers: stored.agentId ? initHeaders(stored.agentId) : { 'Content-Type': 'application/json' }
       });
     }
 
@@ -95,7 +109,7 @@ export async function POST(request: Request) {
         if (record && record.responseJson !== '') {
           return new NextResponse(record.responseJson, {
             status: record.status,
-            headers: { 'Content-Type': 'application/json' }
+            headers: record.agentId ? initHeaders(record.agentId) : { 'Content-Type': 'application/json' }
           });
         }
       }
@@ -131,12 +145,14 @@ export async function POST(request: Request) {
     }
     return new NextResponse(responseJson, {
       status: 200,
-      headers: { 'Content-Type': 'application/json' }
+      headers: initHeaders(agent.agentId)
     });
   } catch (err) {
-    // Free the claim so a retry with the same key can succeed.
+    // Free the claim so a retry with the same key can succeed. Logged detail
+    // is redacted (the error may embed submitted content); the client gets a
+    // generic message.
     if (idempotencyKey !== null) releaseInitKey(idempotencyKey);
-    console.error('Failed to initialize agent:', err);
+    console.error('Failed to initialize agent:', redactSecrets(err instanceof Error ? err.message : String(err)));
     return NextResponse.json(
       { error: "Failed to initialize agent." },
       { status: 500 }
