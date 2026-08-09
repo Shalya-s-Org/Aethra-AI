@@ -319,10 +319,16 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         const res = await fetch(`/api/agent/state?agentId=${encodeURIComponent(agentId)}`);
         if (cancelled) return;
         if (res.status === 404) {
-          // The agent no longer exists server-side (evicted or the server lost
-          // its in-memory registry). Drop the session instead of freezing on a
-          // stale snapshot.
-          resetAgent();
+          // Vercel can route init and state to separate ephemeral instances.
+          // Keep the configured analyst and labeled demo snapshot visible
+          // instead of making a successful initialization look like a reset.
+          // A real shared database will return a live snapshot on the next
+          // request and replace this fallback automatically.
+          setAgentId(DEMO_AGENT_ID);
+          setIsDemoMode(true);
+          setStatus('idle');
+          setCurrentActionDetails('Demo mode: serverless storage is unavailable; showing sample pipeline data.');
+          setHasLoadedSnapshot(true);
           return;
         }
         if (!res.ok) return;
