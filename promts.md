@@ -2623,3 +2623,141 @@ Run lint, typecheck, build, and the complete test suite. Report failures honestl
 
 ## Prompt 32
 /simplify
+
+## Prompt 33
+Audit the current deployment model, then make this app genuinely autonomous after one POST /api/agent/init.
+
+Critical requirements:
+- Commit a real external scheduler configuration appropriate to this repo’s deployment target.
+- Do not rely on setInterval, browser polling, GET requests, or an undocumented manual command.
+- Ensure POST /api/agent/init schedules durable recurring work.
+- Ensure the scheduler invokes POST /api/cron/run securely.
+- Add a deployment-ready config file, not only README instructions.
+- Add a health/status mechanism showing last successful cron run and next due job.
+- Update README with exact deployment steps.
+
+Preserve the existing API contract. Run tests and build.
+
+## Prompt 34
+Make persistence safe for a 48-hour hosted evaluation.
+
+Inspect the current SQLite implementation and deployment assumptions. Replace or abstract it so persistence survives server restarts, serverless cold starts, and multiple application instances.
+
+Requirements:
+- Use a shared durable database suitable for the intended deployment target.
+- Preserve existing schema concepts: agents, posts, discovery candidates, decisions, memory, runs, scheduled jobs, idempotency.
+- Maintain transactions, unique constraints, job leases, and feed ordering.
+- Keep a local SQLite development/test implementation if useful, behind a storage interface.
+- Add migrations, environment documentation, and restart/concurrency tests.
+- Do not break POST /api/agent/init or GET /api/agent/feed.
+
+## Prompt 35
+Fix the current persona-global discovery/editorial pipeline.
+
+Every initialized agent must have isolated:
+- persona configuration
+- discovery candidates
+- editorial decisions
+- memory
+- scheduled job
+- published posts
+- deduplication scope
+
+Requirements:
+- Add agentId and/or personaId scoping to discovery and editorial tables.
+- runAgentCycle(agentId) must only score, generate, and publish that agent’s candidates.
+- Never allow one agent to publish another agent’s decision.
+- Preserve global source-fetch efficiency where possible, but fan out normalized candidates safely per eligible agent.
+- Add regression tests with two agents proving no cross-agent publication, memory leakage, or decision theft.
+
+## Prompt 36
+Audit the repository for obsolete simulation code, misleading comments, and outdated environment documentation.
+
+Requirements:
+- Remove or isolate old demo pools from production execution.
+- Keep demo content out of the judged GET /api/agent/feed response.
+- Ensure .env.example, README, scheduler code, and dashboard wording agree.
+- Remove references claiming API GET or local intervals advance autonomous work.
+- Clearly label fixture-only and simulation-only features.
+- Do not remove useful dashboard functionality; make it display real persisted records only.
+
+Run lint, tests, and build.
+
+## Prompt 37
+Strengthen live topic discovery for Ada, the AI Security persona.
+
+Requirements:
+- Keep allowlisted server-side sources only.
+- Prioritize primary sources: CISA KEV, GitHub Security Advisories, official vendor advisories, arXiv, official AI lab security feeds.
+- Add source freshness checks, canonical URL verification, source-type scoring, and per-source health tracking.
+- Add a configurable source diversity rule so one feed cannot dominate the feed.
+- For high-impact claims, require corroboration or a primary advisory.
+- Add live-provider smoke tests with record/replay fixtures so CI remains deterministic.
+- Persist source health and show it in the dashboard.
+
+## Prompt 38
+Improve the editorial writing system so it does not look like deterministic template output.
+
+Requirements:
+- Keep strict structured-output validation, source allowlists, numerical-claim validation, and quality gate behavior.
+- Retain the local deterministic provider only for tests/offline fallback.
+- Configure a real OpenAI-compatible provider for deployed production.
+- Add several approved Ada writing patterns so openings and transitions do not repeat.
+- Every post must still contain: fact, exploitability/implication, why it matters, Ada’s view, confidence.
+- Require a concrete security or architecture recommendation.
+- Add tests that reject repetitive framing and generic AI-marketing language.
+- Never publish if LLM output fails validation.
+
+## Prompt 39
+Add production-grade semantic duplicate detection.
+
+Requirements:
+- Preserve existing deterministic duplicate checks first: canonical URL, title hash, identifiers, token overlap.
+- Add an optional embeddings provider behind the existing similarity interface.
+- Store embeddings in durable storage with agent/persona scope.
+- Use semantic similarity only after deterministic checks.
+- Require meaningful new evidence before publishing a follow-up on the same story.
+- Add tests for near duplicates, paraphrases, legitimate updates, and unrelated similar vocabulary.
+- If embeddings fail or are unavailable, degrade safely to the existing lexical checks.
+
+## Prompt 40
+Perform a focused security hardening pass on the agent APIs and autonomous pipeline.
+
+Requirements:
+- Protect DELETE /api/agent so agent IDs alone cannot delete work.
+- Add an ownership token or internal authorization mechanism without changing the judged init/feed contract.
+- Keep cron endpoint secret-gated and use timing-safe comparison.
+- Confirm arbitrary URLs can never be fetched from model or source content.
+- Confirm retrieved text is always treated as untrusted data, never instructions.
+- Redact secrets from logs and errors.
+- Add security tests for prompt injection, SSRF attempts, unauthorized deletion, malformed LLM output, and malicious feed content.
+
+## Prompt 41
+Improve the dashboard and API-adjacent judge experience with real evidence of autonomy.
+
+Add real persisted views for:
+- last successful autonomous run
+- next scheduled run
+- source health and recent source failures
+- candidate queue
+- accepted, held, and rejected editorial decisions
+- score breakdown
+- publication rationale
+- related prior posts and editorial-memory continuity
+
+Requirements:
+- Every displayed value must come from persisted data.
+- Never show fabricated “live,” “verified,” “vector,” or scoring metrics.
+- Keep the existing visual style.
+- Do not change the required GET /api/agent/feed response shape.
+
+## Prompt 42
+Create a final release-readiness harness for the Autonomous AI Creator hackathon.
+
+Requirements:
+- Run an accelerated 48-hour test using the real durable scheduler, database adapter, editorial pipeline, memory, and quality gate.
+- Add a production-like integration mode using a real hosted database and cron endpoint.
+- Verify: one init only, no GET-triggered work, scheduler recovery, restart persistence, duplicate cron delivery, source failure, LLM failure, no duplicate posts, valid HTTPS sources, reverse chronological feed.
+- Produce a machine-readable summary and concise human report.
+- Fail the check if no scheduler is configured, persistence is local/ephemeral in production, or any judged API contract assertion fails.
+- Run all tests, lint, typecheck, and build.
