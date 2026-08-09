@@ -42,6 +42,11 @@ function initHeaders(agentId: string): HeadersInit {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = getOwnershipToken(agentId);
   if (token) headers[OWNERSHIP_TOKEN_HEADER] = token;
+  // Let the browser avoid polling a different Vercel function instance for
+  // an agent that only exists in this invocation's ephemeral SQLite file.
+  if (process.env.VERCEL === '1' || process.env.VERCEL_ENV) {
+    headers['X-Aethra-Storage'] = 'ephemeral';
+  }
   return headers;
 }
 

@@ -244,10 +244,22 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const token = res.headers.get('x-agent-ownership-token');
       setOwnershipToken(token);
 
-      setAgentId(data.agentId);
       setConfig(newConfig);
       setIsInitialized(true);
       setStatus('idle');
+
+      if (res.headers.get('x-aethra-storage') === 'ephemeral') {
+        // Do not start the state poll on Vercel: it can hit a separate
+        // function instance that does not share the init route's /tmp file.
+        // The dashboard stays open with clearly labelled demo data instead.
+        setAgentId(DEMO_AGENT_ID);
+        setIsDemoMode(true);
+        setHasLoadedSnapshot(true);
+        setCurrentActionDetails('Demo mode: agent configuration saved for this session; persistent storage is not connected.');
+        return { ok: true };
+      }
+
+      setAgentId(data.agentId);
       setCurrentActionDetails("Agent initialized. Backend autonomous cycles online.");
 
       // Evict any previous session's agent so its scheduler loop stops too.
