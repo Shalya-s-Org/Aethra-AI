@@ -11,7 +11,7 @@ interface DashboardLayoutProps {
 }
 
 export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) => {
-  const { activeTab, setActiveTab, status, isInitialized, resetAgent, config, hasLoadedSnapshot } = useAgent();
+  const { activeTab, setActiveTab, status, isInitialized, resetAgent, config, hasLoadedSnapshot, agentId } = useAgent();
   const [timeString, setTimeString] = useState('');
 
   // Clock tick
@@ -134,6 +134,11 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
 
         {/* View Layout wrapper */}
         <main className="flex-1 overflow-y-auto p-8 relative">
+          {agentId === 'demo-dashboard' && (
+            <div className="mb-5 rounded border border-cyber-amber/30 bg-cyber-amber/10 px-4 py-3 text-xs text-cyber-amber">
+              Demo data is displayed while Vercel has no shared persistent database. Initialize an analyst after connecting durable storage to replace it with live data.
+            </div>
+          )}
           {isInitialized && !hasLoadedSnapshot ? (
             <div className="space-y-6" aria-busy="true" aria-label="Loading agent telemetry">
               <div className="space-y-2">

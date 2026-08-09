@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
-import type { Topic, Post, MemoryNode } from '../data/mockTopics';
+import { initialMemory, initialPosts, initialTopics, type Topic, type Post, type MemoryNode } from '../data/mockTopics';
 import type {
   AgentRunLite,
   BackendAgentInstance,
@@ -124,12 +124,51 @@ const EMPTY_PIPELINE_STATS: PipelineStats = {
   publishCount: 0
 };
 
+// Vercel's temporary filesystem is not shared between serverless routes. Keep
+// the dashboard useful until a shared database is configured, but label every
+// value as demo data and never send it through the judged feed API.
+const DEMO_NOW = '2026-08-09T09:00:00.000Z';
+const DEMO_AGENT_ID = 'demo-dashboard';
+const DEMO_PUBLISHED_POSTS: PublishedPostLite[] = initialPosts.map(post => ({
+  id: post.id,
+  title: post.title,
+  body: post.text,
+  opinion: post.opinion,
+  rationale: post.rationale,
+  createdAt: post.createdAt,
+  sources: post.sources,
+  isDemo: true,
+  decisionId: null,
+  totalScore: null,
+  confidence: post.confidenceScore,
+  citedUrls: post.sources,
+  relatedPosts: [],
+  links: []
+}));
+const DEMO_CANDIDATES: CandidateQueueLite[] = initialTopics.slice(0, 6).map((topic, index) => ({
+  id: topic.id,
+  canonicalUrl: `https://${topic.sources[0]}`,
+  title: topic.title,
+  summary: topic.detailedAnalysis ?? null,
+  publishedAt: new Date(Date.parse(DEMO_NOW) - (index + 1) * 3_600_000).toISOString(),
+  fetchedAt: DEMO_NOW,
+  sourceName: topic.source,
+  sourceType: 'demo',
+  decision: topic.recommendation === 'Accept' ? 'accepted' : 'rejected',
+  totalScore: topic.confidenceScore,
+  explanation: topic.rejectionReason ?? topic.detailedAnalysis ?? null
+}));
+const DEMO_RUN: AgentRunLite = {
+  id: 'demo-run-001', topicId: null, status: 'completed', outcome: 'Demo discovery and editorial cycle completed.',
+  startedAt: '2026-08-09T08:45:00.000Z', finishedAt: '2026-08-09T08:47:00.000Z', error: null
+};
+
 export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [config, setConfig] = useState<AgentConfig>(DEFAULT_CONFIG);
-  const [isInitialized, setIsInitialized] = useState<boolean>(false);
-  const [agentId, setAgentId] = useState<string>("");
-  const [status, setStatus] = useState<AgentStatus>('inactive');
-  const [currentActionDetails, setCurrentActionDetails] = useState<string>("Agent offline. Initialize agent parameters to activate.");
+  const [isInitialized, setIsInitialized] = useState<boolean>(true);
+  const [agentId, setAgentId] = useState<string>(DEMO_AGENT_ID);
+  const [status, setStatus] = useState<AgentStatus>('idle');
+  const [currentActionDetails, setCurrentActionDetails] = useState<string>("Demo mode: showing sample pipeline data until persistent storage is connected.");
   const [countdown, setCountdown] = useState<number>(15);
 
   const [secondsSinceLastScan, setSecondsSinceLastScan] = useState<number>(0);
@@ -137,20 +176,23 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [currentTaskName, setCurrentTaskName] = useState<string>("Observing ecosystem");
   const [nextPublishSeconds, setNextPublishSeconds] = useState<number>(900);
 
-  const [pipelineStats, setPipelineStats] = useState<PipelineStats>(EMPTY_PIPELINE_STATS);
+  const [pipelineStats, setPipelineStats] = useState<PipelineStats>({ scanCount: 6, filterCount: 6, reasonCount: 4, memoryCount: 3, writeCount: 2, publishCount: 2 });
 
-  const [discoveredTopics, setDiscoveredTopics] = useState<Topic[]>([]);
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [memoryNodes, setMemoryNodes] = useState<MemoryNode[]>([]);
-  const [decisions, setDecisions] = useState<Topic[]>([]);
+  const [discoveredTopics, setDiscoveredTopics] = useState<Topic[]>(initialTopics);
+  const [posts, setPosts] = useState<Post[]>(initialPosts);
+  const [memoryNodes, setMemoryNodes] = useState<MemoryNode[]>(initialMemory);
+  const [decisions, setDecisions] = useState<Topic[]>(initialTopics.filter(topic => topic.recommendation !== 'Investigate'));
   const [discoveryDecisions, setDiscoveryDecisions] = useState<DiscoveryDecisionLite[]>([]);
   const [rejectedTodayList, setRejectedTodayList] = useState<Array<{ title: string; reason: string }>>([]);
-  const [sourceHealth, setSourceHealth] = useState<SourceHealthLite[]>([]);
-  const [candidateQueue, setCandidateQueue] = useState<CandidateQueueLite[]>([]);
-  const [agentRuns, setAgentRuns] = useState<AgentRunLite[]>([]);
-  const [scheduledJob, setScheduledJob] = useState<ScheduledJobLite | null>(null);
-  const [memoryEntries, setMemoryEntries] = useState<MemoryEntryLite[]>([]);
-  const [publishedPosts, setPublishedPosts] = useState<PublishedPostLite[]>([]);
+  const [sourceHealth, setSourceHealth] = useState<SourceHealthLite[]>([
+    { sourceName: 'Anthropic Research Blog', sourceType: 'demo', url: 'https://anthropic.com/news', status: 'success', freshness: 'ok', itemCount: 2, error: null, fetchedAt: DEMO_NOW, successCount: 1, failureCount: 0, lastSuccessAt: DEMO_NOW, lastFailureAt: null, consecutiveFailures: 0 },
+    { sourceName: 'arXiv', sourceType: 'demo', url: 'https://arxiv.org', status: 'success', freshness: 'ok', itemCount: 3, error: null, fetchedAt: DEMO_NOW, successCount: 1, failureCount: 0, lastSuccessAt: DEMO_NOW, lastFailureAt: null, consecutiveFailures: 0 }
+  ]);
+  const [candidateQueue, setCandidateQueue] = useState<CandidateQueueLite[]>(DEMO_CANDIDATES);
+  const [agentRuns, setAgentRuns] = useState<AgentRunLite[]>([DEMO_RUN]);
+  const [scheduledJob, setScheduledJob] = useState<ScheduledJobLite | null>({ id: 'demo-job-001', jobType: 'agent_cycle', status: 'active', scheduleMs: 1_800_000, nextRunAtMs: Date.parse(DEMO_NOW) + 1_800_000, attempts: 0, maxAttempts: 3, backoffMs: 60_000, lastRunAtMs: Date.parse(DEMO_RUN.finishedAt as string), lastError: null, leaseOwner: null, leaseExpiresAtMs: null });
+  const [memoryEntries, setMemoryEntries] = useState<MemoryEntryLite[]>(initialMemory.map(node => ({ id: node.id, kind: 'editorial', subject: node.label, content: node.details, importance: 80, occurrences: 1, firstSeenAt: node.timestamp, lastSeenAt: node.timestamp })));
+  const [publishedPosts, setPublishedPosts] = useState<PublishedPostLite[]>(DEMO_PUBLISHED_POSTS);
   const [editorialThresholds, setEditorialThresholds] = useState<EditorialThresholdsLite>({
     publish: 78,
     reject: 60,
@@ -167,7 +209,8 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [novaLiveFocus, setNovaLiveFocus] = useState(DEFAULT_FOCUS);
   // True once the first live engine snapshot has been applied. Lets the
   // dashboard show a skeleton instead of empty defaults while bootstrapping.
-  const [hasLoadedSnapshot, setHasLoadedSnapshot] = useState<boolean>(false);
+  const [hasLoadedSnapshot, setHasLoadedSnapshot] = useState<boolean>(true);
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(true);
   // The ownership credential issued with the init response header. DELETE
   // /api/agent requires it — an agent id alone can never delete an agent — so
   // the dashboard keeps it in memory for the session and sends it on reset.
@@ -177,6 +220,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const previousId = agentId;
     const previousToken = ownershipToken;
     setHasLoadedSnapshot(false);
+    setIsDemoMode(false);
     try {
       const res = await fetch('/api/agent/init', {
         method: 'POST',
@@ -266,7 +310,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // client stays a thin view. The `cancelled` flag drops in-flight responses from
   // a previous session (reset or re-init) so stale state can never be resurrected.
   useEffect(() => {
-    if (!isInitialized || !agentId) return;
+    if (isDemoMode || !isInitialized || !agentId) return;
 
     let cancelled = false;
 
@@ -325,7 +369,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       cancelled = true;
       clearInterval(interval);
     };
-  }, [isInitialized, agentId, resetAgent]);
+  }, [isDemoMode, isInitialized, agentId, resetAgent]);
 
   const nextPublishCountdown = useMemo(() => {
     const hours = Math.floor(nextPublishSeconds / 3600);
