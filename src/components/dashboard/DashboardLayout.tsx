@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAgent } from '../../context/AgentContext';
-import { LayoutDashboard, Radio, Database, Scale, Eye, BarChart3, Settings, Power } from 'lucide-react';
+import { LayoutDashboard, Radio, Database, Scale, Eye, BarChart3, Settings, Power, Activity, History } from 'lucide-react';
 import { StatusBadge } from '../ui/StatusBadge';
 import { cn } from '../../utils/cn';
 
@@ -31,6 +31,8 @@ export const DashboardLayout: React.FC<DashboardLayoutProps> = ({ children }) =>
     { id: 'memory', label: 'Knowledge Memory', icon: <Database className="w-4 h-4" /> },
     { id: 'decisions', label: 'Editorial Decisions', icon: <Scale className="w-4 h-4" /> },
     { id: 'queue', label: 'Discovery Queue', icon: <Eye className="w-4 h-4" /> },
+    { id: 'sources', label: 'Source Health', icon: <Activity className="w-4 h-4" /> },
+    { id: 'runs', label: 'Run History', icon: <History className="w-4 h-4" /> },
     { id: 'analytics', label: 'Analytics Console', icon: <BarChart3 className="w-4 h-4" /> },
     { id: 'settings', label: 'Settings Console', icon: <Settings className="w-4 h-4" /> },
   ];

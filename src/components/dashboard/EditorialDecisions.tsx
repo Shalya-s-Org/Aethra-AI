@@ -2,15 +2,20 @@
 
 import React, { useState } from 'react';
 import { useAgent } from '../../context/AgentContext';
-import { GlassCard } from '../ui/GlassCard';
-import { Scale, CheckCircle2, XCircle, ChevronDown, Eye, Database, Cpu, ShieldCheck, ShieldAlert, Clock, Sparkles } from 'lucide-react';
+import { Scale, CheckCircle2, XCircle, ChevronDown, Cpu, ShieldCheck, ShieldAlert, Clock, Sparkles, FileText } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import type { DiscoveryDecisionLite } from '../../lib/agentTypes';
 
 export const EditorialDecisions: React.FC = () => {
-  const { decisions, discoveryDecisions } = useAgent();
+  const { decisions, discoveryDecisions, publishedPosts } = useAgent();
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [expandedDiscoveryId, setExpandedDiscoveryId] = useState<string | null>(null);
+
+  const postByDecision = React.useMemo(() => {
+    const map = new Map<string, typeof publishedPosts[number]>();
+    for (const p of publishedPosts) if (p.decisionId) map.set(p.decisionId, p);
+    return map;
+  }, [publishedPosts]);
 
   const toggleExpand = (id: string) => {
     setExpandedId(prev => prev === id ? null : id);
@@ -136,6 +141,87 @@ export const EditorialDecisions: React.FC = () => {
                           <p className="pl-4 border-l border-white/10 text-gray-200">{dec.explanation}</p>
                         </div>
 
+                        {/* Real score breakdown */}
+                        <div>
+                          <div className="text-[8px] font-mono text-gray-500 uppercase tracking-widest mb-2 font-bold">
+                            Score Breakdown · {dec.totalScore}/100
+                          </div>
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1.5">
+                            {[
+                              { label: 'Persona relevance', value: dec.personaRelevance, max: 20 },
+                              { label: 'Technical impact', value: dec.technicalImpact, max: 20 },
+                              { label: 'Source quality', value: dec.sourceQuality, max: 15 },
+                              { label: 'Recency', value: dec.recency, max: 15 },
+                              { label: 'Novelty', value: dec.novelty, max: 15 },
+                              { label: 'Discussion value', value: dec.discussionValue, max: 10 },
+                              { label: 'Evidence confidence', value: dec.evidenceConfidence, max: 5 }
+                            ].map(c => (
+                              <div key={c.label} className="flex items-center gap-2 font-mono text-[9px]">
+                                <span className="text-gray-400 truncate">{c.label}</span>
+                                <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full rounded-full bg-cyber-cyan"
+                                    style={{ width: `${Math.round((c.value / c.max) * 100)}%` }}
+                                  />
+                                </div>
+                                <span className="text-white w-6 text-right">{c.value}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {dec.candidateUrl && (
+                          <div className="font-mono text-[9px] text-gray-400">
+                            Source: <span className="text-cyber-cyan">{dec.sourceName ?? '—'}</span>{dec.sourceType ? ` (${dec.sourceType})` : ''} ·{' '}
+                            <a href={dec.candidateUrl} target="_blank" rel="noreferrer" className="text-cyber-cyan hover:underline">
+                              {dec.candidateUrl.replace(/^https?:\/\//, '')}
+                            </a>
+                          </div>
+                        )}
+
+                        {(() => {
+                          const post = postByDecision.get(dec.id);
+                          if (!post) return null;
+                          return (
+                            <div className="border-t border-white/5 pt-3">
+                              <div className="text-[8px] font-mono text-gray-500 uppercase tracking-widest mb-2 font-bold flex items-center gap-1">
+                                <FileText className="w-3.5 h-3.5 text-cyber-emerald" />
+                                Published Post (persisted)
+                              </div>
+                              <div className="space-y-2">
+                                <p className="text-[10.5px] text-white font-semibold leading-relaxed">{post.title}</p>
+                                {post.body && <p className="text-[9.5px] text-gray-300 leading-relaxed whitespace-pre-line pl-3 border-l border-white/10">{post.body}</p>}
+                                {post.rationale && (
+                                  <p className="text-[9px] text-gray-400 leading-relaxed pl-3 border-l border-white/10">
+                                    <span className="text-gray-500 uppercase tracking-widest text-[8px]">Rationale: </span>{post.rationale}
+                                  </p>
+                                )}
+                                {post.citedUrls.length > 0 && (
+                                  <div className="flex flex-wrap gap-1.5 pt-1">
+                                    {post.citedUrls.map((u, i) => (
+                                      <a key={`cu-${i}`} href={u} target="_blank" rel="noreferrer" className="px-1.5 py-0.5 rounded bg-black/40 border border-white/5 text-[8px] text-cyber-cyan font-mono hover:border-cyber-cyan/30">
+                                        {u.replace(/^https?:\/\//, '').slice(0, 40)}
+                                      </a>
+                                    ))}
+                                  </div>
+                                )}
+                                {post.links.length > 0 && (
+                                  <div className="text-[9px] text-gray-400 pt-1">
+                                    <span className="text-gray-500 uppercase tracking-widest text-[8px]">Related prior posts: </span>
+                                    {post.links.map(l => l.relatedTitle).join(' · ')}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {dec.generationFailure && (
+                          <div className="p-2 rounded bg-cyber-red/5 border border-cyber-red/20 text-[9px] text-cyber-red font-mono">
+                            Generation failure: {dec.generationFailure}
+                          </div>
+                        )}
+
                         {dec.quality && dec.quality.checks.length > 0 && (
                           <div>
                             <div className="text-[8px] font-mono text-gray-500 uppercase tracking-widest mb-2 font-bold flex items-center gap-1">
@@ -177,7 +263,15 @@ export const EditorialDecisions: React.FC = () => {
         )}
       </div>
 
-      {/* Legacy sim decisions */}
+      {/* Simulation-engine decisions — labeled, not persisted pipeline data */}
+      <div className="flex items-center gap-2 mt-8 mb-3">
+        <h3 className="font-display text-sm font-bold tracking-wider text-white uppercase">
+          Simulation Engine Decisions
+        </h3>
+        <span className="px-1.5 py-0.5 rounded bg-yellow-500/10 text-yellow-400 border border-yellow-500/25 text-[8px] font-mono tracking-wider">
+          SIMULATION
+        </span>
+      </div>
       {decisions.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-center border border-dashed border-white/5 rounded-xl bg-black/20">
           <Scale className="w-12 h-12 text-gray-600 mb-3" />
@@ -193,9 +287,8 @@ export const EditorialDecisions: React.FC = () => {
             <div className="col-span-1 text-center">Credibility</div>
             <div className="col-span-1 text-center">Novelty</div>
             <div className="col-span-1 text-center">Eng. Impact</div>
-            <div className="col-span-1 text-center">Memory Match</div>
             <div className="col-span-1 text-center">Decision</div>
-            <div className="col-span-2 text-right">Expansion</div>
+            <div className="col-span-3 text-right">Expansion</div>
           </div>
 
           {/* Table Rows */}
@@ -203,14 +296,6 @@ export const EditorialDecisions: React.FC = () => {
             {decisions.map((dec) => {
               const isExpanded = expandedId === dec.id;
               const isAccepted = dec.recommendation === 'Accept';
-              
-              // Memory match calculations based on acceptance state.
-              // Deterministic per decision id — Math.random() here re-rolled a
-              // different % on every render (impure render, flickering UI).
-              const idSeed = [...dec.id].reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) >>> 0, 0);
-              const memoryMatch = isAccepted 
-                ? `${(idSeed % 15) + 5}%` // Low match is good
-                : dec.category === 'Duplicate' ? '94%' : `${(idSeed % 20) + 15}%`;
 
               return (
                 <div 
@@ -266,16 +351,7 @@ export const EditorialDecisions: React.FC = () => {
                       <span className="text-white font-medium">{dec.importanceScore}/100</span>
                     </div>
 
-                    {/* Column 6: Memory Match */}
-                    <div className="col-span-4 md:col-span-1 text-left md:text-center font-mono">
-                      <span className="text-gray-500 text-[8px] uppercase block md:hidden mb-0.5">Memory Match</span>
-                      <span className={cn(
-                        "font-semibold",
-                        isAccepted ? "text-cyber-emerald" : dec.category === 'Duplicate' ? "text-cyber-red font-bold" : "text-gray-400"
-                      )}>{memoryMatch}</span>
-                    </div>
-
-                    {/* Column 7: Decision */}
+                    {/* Column 6: Decision */}
                     <div className="col-span-4 md:col-span-1 text-left md:text-center">
                       <span className="text-gray-500 text-[8px] uppercase block md:hidden mb-0.5">Decision</span>
                       <span className={cn(
@@ -288,8 +364,8 @@ export const EditorialDecisions: React.FC = () => {
                       </span>
                     </div>
 
-                    {/* Column 8: Toggle Arrow */}
-                    <div className="col-span-4 md:col-span-2 text-right flex justify-end items-center gap-2">
+                    {/* Column 7: Toggle Arrow */}
+                    <div className="col-span-4 md:col-span-3 text-right flex justify-end items-center gap-2">
                       <span className="text-[9px] text-gray-500 font-mono tracking-widest uppercase hidden md:inline">Inspect</span>
                       <ChevronDown className={cn("w-3.5 h-3.5 text-gray-500 transition-transform duration-300", isExpanded && "rotate-180")} />
                     </div>
@@ -311,14 +387,9 @@ export const EditorialDecisions: React.FC = () => {
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="p-3 rounded bg-black/60 border border-white/5 font-mono text-[9px] text-gray-400 flex flex-col justify-between">
-                          <div>
-                            <span className="text-white block uppercase tracking-wider mb-1 font-display font-semibold">Memory Index Lookup</span>
-                            <span>Proximity matching: Vector similarity score evaluated at {memoryMatch}. Threshold configuration limits set to 70%.</span>
-                          </div>
-                          <span className={cn("font-bold uppercase mt-2 block tracking-widest text-[8px]", isAccepted ? "text-cyber-emerald" : "text-cyber-red")}>
-                            Collision Test: {isAccepted ? "Cleared (Novel Topic)" : "Failed (Duplicate Pattern)"}
-                          </span>
+                        <div className="p-3 rounded bg-black/60 border border-white/5 font-mono text-[9px] text-gray-400">
+                          <span className="text-white block uppercase tracking-wider mb-1 font-display font-semibold">Simulation Note</span>
+                          <span>This row is the in-browser simulation engine&apos;s decision. The real discovery pipeline&apos;s durable editorial decisions (with score breakdowns, quality gate, and persisted memory) are listed in the Discovery Pipeline section above.</span>
                         </div>
 
                         <div className="p-3 rounded bg-black/60 border border-white/5 font-mono text-[9px] text-gray-400">

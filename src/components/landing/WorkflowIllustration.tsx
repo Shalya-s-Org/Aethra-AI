@@ -32,7 +32,7 @@ const stages: Stage[] = [
   },
   {
     title: "4. Memory Audit",
-    desc: "Queries the vector knowledge base to detect duplicate ideas and cross-reference histories.",
+    desc: "Checks the durable memory index to detect duplicate ideas and cross-reference histories.",
     icon: <Database className="w-5 h-5 text-cyan-400" />,
     color: "from-cyan-500/20 to-cyan-500/5 border-cyan-500/30"
   },

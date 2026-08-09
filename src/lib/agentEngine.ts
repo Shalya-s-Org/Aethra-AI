@@ -7,7 +7,8 @@ import type {
   DiscoveryDecisionLite,
   EngineMeta,
   PipelineRun,
-  PipelineStage
+  PipelineStage,
+  SourceHealthLite
 } from './agentTypes';
 import {
   generateServerUUID,
@@ -546,6 +547,20 @@ export function initializeAgentInstance(
       { timestamp: "08:02", message: "Scanned incoming sources. Filtered 7 low-credibility records." }
     ],
     novaLiveFocus: defaultFocus(domain),
+    // Real persisted-pipeline data is empty until the discovery/editorial
+    // pipeline runs; the state read (peekAgentState) fills these from SQLite.
+    sourceHealth: [],
+    candidateQueue: [],
+    agentRuns: [],
+    scheduledJob: null,
+    memoryEntries: [],
+    publishedPosts: [],
+    editorialThresholds: {
+      publish: PUBLISH_THRESHOLD,
+      reject: REJECT_THRESHOLD,
+      dailyCap: DEFAULT_DAILY_CAP,
+      routineIntervalMinutes: Math.round(DEFAULT_ROUTINE_INTERVAL_MS / 60_000)
+    },
     topicPool,
     unprocessedPool: [...topicPool]
   };
@@ -656,25 +671,193 @@ export function flushDueAgents(now: number = Date.now()): number {
 
 // Pure read: snapshot an agent WITHOUT writing anything. Used by GET /feed's
 // sibling state and by the state route after flushing. Attaches the
-// discovery-pipeline editorial decisions (with quality-gate results) so the
-// dashboard's editorial decisions view shows both the sim and the real
-// pipeline; the sim engine itself never touches them.
+// discovery-pipeline editorial decisions (with quality-gate results) and the
+// other real persisted-pipeline collections (source health, candidate queue,
+// agent runs, scheduled job, durable memory, published posts) so the dashboard
+// renders only data that actually exists in SQLite. The sim engine itself
+// never touches these fields.
 export function peekAgentState(agentId: string, now: number = Date.now()): BackendAgentInstance | null {
   const row = getAgentRow(agentId);
   if (!row) return null;
   const state = snapshotAgent(row.state, row.engine, now);
-  state.discoveryDecisions = getDiscoveryDecisions({ limit: 15 }).map(r => ({
+
+  // --- Discovery-pipeline editorial decisions (with score breakdown) ---
+  const decisions = getDiscoveryDecisions({ limit: 20 });
+  state.discoveryDecisions = decisions.map(r => ({
     id: r.id,
     candidateId: r.candidateId,
     title: r.title,
     decision: r.decision,
     totalScore: r.totalScore,
+    personaRelevance: r.personaRelevance,
+    technicalImpact: r.technicalImpact,
+    sourceQuality: r.sourceQuality,
+    recency: r.recency,
+    novelty: r.novelty,
+    discussionValue: r.discussionValue,
+    evidenceConfidence: r.evidenceConfidence,
     explanation: r.explanation,
     decidedAt: r.decidedAt,
     generationStatus: r.generationStatus,
+    generationFailure: r.generationFailure,
     qualityStatus: r.qualityStatus,
-    quality: r.qualityJson == null ? null : (JSON.parse(r.qualityJson) as DiscoveryDecisionLite['quality'])
+    quality: r.qualityJson == null ? null : (JSON.parse(r.qualityJson) as DiscoveryDecisionLite['quality']),
+    candidateUrl: r.candidateUrl,
+    sourceName: r.sourceName,
+    sourceType: r.sourceType,
+    publishedPostId: r.publishedPostId
   }));
+
+  // --- Candidate queue: persisted discovery candidates + their decision ---
+  const decisionByCandidate = new Map(decisions.map(d => [d.candidateId, d]));
+  state.candidateQueue = getDiscoveryCandidates({ limit: 40 }).map(c => {
+    const dec = decisionByCandidate.get(c.id);
+    return {
+      id: c.id,
+      canonicalUrl: c.canonicalUrl,
+      title: c.title,
+      summary: c.summary,
+      publishedAt: c.publishedAt,
+      fetchedAt: c.fetchedAt,
+      sourceName: c.sourceName,
+      sourceType: c.sourceType,
+      decision: dec ? dec.decision : null,
+      totalScore: dec ? dec.totalScore : null,
+      explanation: dec ? dec.explanation : null
+    };
+  });
+
+  // --- Source health: aggregated from the durable discovery_fetches table ---
+  const fetches = getDiscoveryFetches({ limit: 200 });
+  const bySource = new Map<string, SourceHealthLite>();
+  for (const f of fetches) {
+    let agg = bySource.get(f.sourceName);
+    if (!agg) {
+      agg = {
+        sourceName: f.sourceName,
+        sourceType: f.sourceType,
+        url: f.url,
+        status: f.status,
+        itemCount: f.itemCount,
+        error: f.error,
+        fetchedAt: f.fetchedAt,
+        successCount: 0,
+        failureCount: 0,
+        lastSuccessAt: null,
+        lastFailureAt: null
+      };
+      bySource.set(f.sourceName, agg);
+    }
+    if (f.status === 'success') {
+      agg.successCount += 1;
+      if (agg.lastSuccessAt == null) agg.lastSuccessAt = f.fetchedAt;
+    } else {
+      agg.failureCount += 1;
+      if (agg.lastFailureAt == null) agg.lastFailureAt = f.fetchedAt;
+    }
+  }
+  state.sourceHealth = [...bySource.values()].sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt));
+
+  // --- Agent run history + the durable scheduled job ---
+  state.agentRuns = getRunsByAgent(agentId)
+    .slice(0, 50)
+    .map(r => ({
+      id: r.id,
+      topicId: r.topicId,
+      status: r.status,
+      outcome: r.outcome,
+      startedAt: r.startedAt,
+      finishedAt: r.finishedAt,
+      error: r.error
+    }));
+  const job = getScheduledJobByAgent(agentId);
+  state.scheduledJob = job
+    ? {
+        id: job.id,
+        jobType: job.jobType,
+        status: job.status,
+        scheduleMs: job.scheduleMs,
+        nextRunAtMs: job.nextRunAtMs,
+        attempts: job.attempts,
+        maxAttempts: job.maxAttempts,
+        backoffMs: job.backoffMs,
+        lastRunAtMs: job.lastRunAtMs,
+        lastError: job.lastError,
+        leaseOwner: job.leaseOwner,
+        leaseExpiresAtMs: job.leaseExpiresAtMs
+      }
+    : null;
+
+  // --- Durable editorial memory (persona scope) ---
+  state.memoryEntries = getRecentMemoryEntries({
+    agentId: null,
+    kinds: ['short_term', 'long_term', 'editorial'],
+    limit: 40
+  }).map(e => ({
+    id: e.id,
+    kind: e.kind,
+    subject: e.subject,
+    content: e.content,
+    importance: e.importance,
+    occurrences: e.occurrences,
+    firstSeenAt: e.firstSeenAt,
+    lastSeenAt: e.lastSeenAt
+  }));
+
+  // --- Published posts (durable posts table; demo/seed posts labeled) ---
+  const postRows = getPostsByAgent(agentId, { includeDemo: true });
+  const postTitleById = new Map(
+    getRecentPostsForMemory(agentId, 200).map(p => [p.id, p.title] as const)
+  );
+  const decisionByPost = new Map(
+    decisions.filter(d => d.publishedPostId != null).map(d => [d.publishedPostId as string, d] as const)
+  );
+  state.publishedPosts = postRows.map(p => {
+    const dec = decisionByPost.get(p.id);
+    let generated: { confidence?: number; citedUrls?: string[]; relatedPosts?: string[] } | null = null;
+    if (dec && dec.generatedJson != null) {
+      try {
+        generated = JSON.parse(dec.generatedJson) as {
+          confidence?: number;
+          citedUrls?: string[];
+          relatedPosts?: string[];
+        } | null;
+      } catch {
+        generated = null;
+      }
+    }
+    return {
+      id: p.id,
+      title: p.title,
+      body: p.body,
+      opinion: p.opinion,
+      rationale: p.rationale,
+      createdAt: p.createdAt,
+      sources: p.sources,
+      isDemo: p.isDemo,
+      decisionId: dec ? dec.id : null,
+      totalScore: dec ? dec.totalScore : null,
+      confidence: generated && typeof generated.confidence === 'number' ? generated.confidence : null,
+      citedUrls: generated && Array.isArray(generated.citedUrls) ? generated.citedUrls : [],
+      relatedPosts: generated && Array.isArray(generated.relatedPosts) ? generated.relatedPosts : [],
+      links: getPostLinks(p.id).map(l => ({
+        relatedPostId: l.relatedPostId,
+        relatedTitle: postTitleById.get(l.relatedPostId) ?? l.relatedPostId,
+        relationType: l.relationType,
+        similarity: l.similarity,
+        reason: l.reason
+      }))
+    };
+  });
+
+  // --- Real editorial thresholds (decision engine constants) ---
+  state.editorialThresholds = {
+    publish: PUBLISH_THRESHOLD,
+    reject: REJECT_THRESHOLD,
+    dailyCap: DEFAULT_DAILY_CAP,
+    routineIntervalMinutes: Math.round(DEFAULT_ROUTINE_INTERVAL_MS / 60_000)
+  };
+
   return state;
 }
 

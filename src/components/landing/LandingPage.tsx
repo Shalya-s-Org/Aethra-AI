@@ -27,9 +27,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartInit }) => {
   const animationStages = [
     { title: "Discover", desc: "Ingesting live code commits, research papers, and technical blogs 24/7", color: "text-blue-400 border-blue-500/20" },
     { title: "Reason", desc: "Applying strict credibility, novelty, and systems architecture metrics", color: "text-purple-400 border-purple-500/20" },
-    { title: "Remember", desc: "Deduplicating topics against long-term vector database memory", color: "text-cyan-400 border-cyan-500/20" },
+    { title: "Remember", desc: "Deduplicating topics against durable editorial memory", color: "text-cyan-400 border-cyan-500/20" },
     { title: "Publish", desc: "Writing and broadcasting technical architecture review blocks", color: "text-emerald-400 border-emerald-500/20" },
-    { title: "Learn", desc: "Updating vector networks and committing node paths to the memory graph", color: "text-pink-400 border-pink-500/20" }
+    { title: "Learn", desc: "Committing new insights back into durable editorial memory", color: "text-pink-400 border-pink-500/20" }
   ];
 
   return (
@@ -91,7 +91,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartInit }) => {
         >
           Meet AETHRA AI (Dr. Nova), a digital AI architect that monitors the tech ecosystem 24/7. 
           Unlike typical chatbots, it independently discovers engineering breakthroughs, filters marketing noise, 
-          queries its vector memory, and publishes detailed architectural reviews without human prompts.
+          queries its durable memory, and publishes detailed architectural reviews without human prompts.
         </motion.p>
 
         {/* Dynamic In-One Animation explaining the flow */}
