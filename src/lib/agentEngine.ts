@@ -19,8 +19,16 @@ import {
   deleteAgentRow,
   findPublishedByCanonicalSource,
   getAgentRow,
+  getDiscoveryCandidates,
   getDiscoveryDecisions,
+  getDiscoveryFetches,
   getMemoryNodesByAgent,
+  getPostLinks,
+  getPostsByAgent,
+  getRecentMemoryEntries,
+  getRecentPostsForMemory,
+  getRunsByAgent,
+  getScheduledJobByAgent,
   hasDecision,
   hasPublishedTopic,
   insertDecision,
@@ -34,6 +42,8 @@ import {
   upsertTopicRow,
   withTransaction
 } from './db';
+import { DEFAULT_DAILY_CAP, DEFAULT_ROUTINE_INTERVAL_MS } from './editorial/engine';
+import { PUBLISH_THRESHOLD, REJECT_THRESHOLD } from './editorial/types';
 import { ulid } from './ids';
 import { linkRelatedPosts, recordMemoryForAccepted } from './memory';
 import { getPersona, validatePost } from './persona';
