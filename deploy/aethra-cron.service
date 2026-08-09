@@ -1,0 +1,19 @@
+# Aethra AI — cron tick unit (one-shot, invoked by aethra-cron.timer).
+#
+# The ONLY external scheduler trigger for durable recurring work. It invokes
+# POST /api/cron/run securely: the secret from /etc/aethra/aethra.env is sent
+# as a Bearer token, and the route rejects requests without it (401). The
+# webhook hits 127.0.0.1 so the scheduler never needs public network access.
+# curl -f makes a non-2xx response a unit failure, visible in the journal.
+#
+#   sudo systemctl status aethra-cron.service     # last tick result
+#   journalctl -u aethra-cron.service             # last tick output
+
+[Unit]
+Description=Aethra AI cron tick (POST /api/cron/run)
+
+[Service]
+Type=oneshot
+# User=aethra
+EnvironmentFile=/etc/aethra/aethra.env
+ExecStart=/usr/bin/curl -fsS -X POST -H "Authorization: Bearer ${AETHRA_CRON_SECRET}" http://127.0.0.1:3000/api/cron/run

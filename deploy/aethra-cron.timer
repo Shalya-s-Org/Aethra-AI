@@ -1,0 +1,17 @@
+# Aethra AI — cron tick timer.
+#
+# Fires aethra-cron.service every 15 minutes; the DB-backed lease means a
+# duplicate or late delivery is harmless (only one worker wins each occurrence,
+# and a 30-minute agent cadence is comfortably covered). Persistent=true
+# catches ticks missed while the host was down (e.g. during a reboot).
+
+[Unit]
+Description=Run the Aethra AI cron tick every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target

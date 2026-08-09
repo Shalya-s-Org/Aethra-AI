@@ -1,0 +1,28 @@
+# Aethra AI — web server unit.
+#
+# Hosts the API (POST /api/agent/init, GET /api/agent/feed, GET /api/health)
+# and the cron webhook POST /api/cron/run. The app's durable SQLite database
+# needs a persistent, writable filesystem, so the deployment target is a
+# single always-on Linux host (VM/VPS/container) — not serverless.
+#
+# Install (see README "Deployment"):
+#   sudo cp deploy/aethra-web.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now aethra-web.service
+
+[Unit]
+Description=Aethra AI web server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/aethra
+# The app writes its SQLite DB and logs; run as a dedicated user in production.
+# User=aethra
+EnvironmentFile=/etc/aethra/aethra.env
+ExecStart=/usr/bin/npm run start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
