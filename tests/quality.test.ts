@@ -8,6 +8,7 @@ const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'aethra-quality-test-'));
 process.env.AETHRA_DB_PATH = path.join(TMP_DIR, 'quality.db');
 
 import { runEditorial } from '../src/lib/editorial/engine';
+import { initializeAgentInstance } from '../src/lib/agentEngine';
 import { makeCandidate, type SourceType } from '../src/lib/discovery/types';
 import { getPersona } from '../src/lib/persona';
 import { runQualityGate, type QualityGateInput } from '../src/lib/quality';
@@ -27,6 +28,9 @@ const DAY = 25 * 3600_000;
 const nowFor = (i: number): number => T0 + i * DAY;
 const iso = (ms: number): string => new Date(ms).toISOString();
 const NO_LIMITS = { routineIntervalMs: 0, dailyCap: 10_000 };
+
+// The editorial pipeline is per-agent; one agent owns this file's state.
+const AGENT_ID = initializeAgentInstance('Quality Test', 'ai-security').agentId;
 
 const persona = getPersona(null);
 
@@ -153,6 +157,62 @@ describe('quality gate: reject cases (required checks)', () => {
     assert.equal(verdictOf(g), 'reject');
   });
 
+  it('rejects a draft with no concrete security/architecture recommendation', () => {
+    // Analysis but no recommendation: no should/must verb aimed at a concrete
+    // action anywhere in the draft.
+    const noRecommendation = draft({
+      text: [
+        FACT,
+        EXPLOIT,
+        BLAST,
+        'Mitigations. The canonical advisory does not disclose a specific mitigation.',
+        'Architectural implications. This finding reinforces isolating the affected component behind a trust boundary.',
+        VIEW
+      ].join(' ')
+    });
+    const g = input({ draft: noRecommendation });
+    assert.equal(verdictOf(g), 'reject');
+    assert.ok(runQualityGate(g).reasons.some(r => /recommendation/.test(r)));
+  });
+
+  it('rejects a draft that urges action without naming a concrete action', () => {
+    // No verb+action pair anywhere: the mitigation sentence names no action,
+    // and the implication sentence urges care but no concrete action.
+    const vague = draft({
+      text: [
+        FACT,
+        EXPLOIT,
+        BLAST,
+        'Mitigations. The canonical advisory does not disclose a specific mitigation.',
+        'Architectural implications. Operators should carefully evaluate the implications before proceeding.',
+        VIEW
+      ].join(' ')
+    });
+    assert.equal(verdictOf(input({ draft: vague })), 'reject');
+  });
+
+  it('passes a draft with a concrete recommendation', () => {
+    const report = runQualityGate(input());
+    const recommendation = report.checks.find(c => c.id === 'recommendation');
+    assert.ok(recommendation, 'recommendation check must exist');
+    assert.equal(recommendation.passed, true);
+    assert.equal(report.verdict, 'pass');
+  });
+
+  it('rejects a second draft that repeats the same approved opening', () => {
+    // Two drafts opening with the SAME approved-pattern phrasing: the second,
+    // evaluated against the first's opening, must be rejected for repetition.
+    const opening = 'Start with the fact: the disclosure is concrete and the fix is already shipping.';
+    const g = input({
+      recentOpenings: [opening],
+      draft: draft({
+        text: [opening, FACT, EXPLOIT, BLAST, MITIGATION, ARCH, VIEW].join(' ')
+      })
+    });
+    assert.equal(verdictOf(g), 'reject');
+    assert.ok(runQualityGate(g).reasons.some(r => /Opening repeats/.test(r)));
+  });
+
   it('rejects a draft violating persona exclusions', () => {
     const g = input({
       draft: draft({ title: 'Celebrity gossip about prompt injection' })
@@ -268,7 +328,7 @@ describe('editorial engine integration', () => {
       'Critical prompt injection vulnerability in agent framework allows remote code execution',
       'https://github.com/advisories/GHSA-qlty-e2e-0001'
     );
-    const run = await runEditorial({ now: nowFor(1), ...NO_LIMITS });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(1), ...NO_LIMITS });
     const decision = run.decisions.find(d => d.candidateId === id);
     assert.ok(decision);
     assert.equal(decision!.kind, 'accepted');
@@ -288,7 +348,7 @@ describe('editorial engine integration', () => {
     const id = addStrongCandidate(title, url);
     // Schema-valid and well-structured, but low confidence → polish-only hold.
     const weak = engineDraft({ title, canonicalUrl: url }, { confidence: 40 });
-    const run = await runEditorial({
+    const run = await runEditorial({ agentId: AGENT_ID,
       now: nowFor(2),
       ...NO_LIMITS,
       provider: draftProvider(weak)
@@ -305,7 +365,7 @@ describe('editorial engine integration', () => {
 
     // Next run with the clean default provider: the held candidate is retried
     // and passes the gate.
-    const run2 = await runEditorial({ now: nowFor(3), ...NO_LIMITS });
+    const run2 = await runEditorial({ agentId: AGENT_ID, now: nowFor(3), ...NO_LIMITS });
     const decision2 = run2.decisions.find(d => d.candidateId === id);
     assert.ok(decision2);
     assert.equal(decision2!.kind, 'accepted');
@@ -327,7 +387,7 @@ describe('editorial engine integration', () => {
       ].join(' ')
     });
     const before = gatherMemoryItems(null);
-    const run = await runEditorial({
+    const run = await runEditorial({ agentId: AGENT_ID,
       now: nowFor(4),
       ...NO_LIMITS,
       provider: draftProvider(marketing)

@@ -6,15 +6,17 @@ import { labFeedsAdapter } from './labFeeds';
 import { githubReleasesAdapter } from './githubReleases';
 
 /**
- * All allowlisted discovery sources, in execution order. Every adapter only
- * ever requests its own configured feed URL(s); nothing retrieved from a feed
- * can cause another request (no content-derived fetching).
+ * All allowlisted discovery sources, in execution order. Primary sources run
+ * first (CISA KEV → GitHub advisories → official AI-lab/vendor feeds), then
+ * secondary research/release feeds. Every adapter only ever requests its own
+ * configured feed URL(s); nothing retrieved from a feed can cause another
+ * request (no content-derived fetching).
  */
 export const ADAPTERS: DiscoveryAdapter[] = [
-  githubAdvisoriesAdapter,
   cisaKevAdapter,
-  arxivAdapter,
+  githubAdvisoriesAdapter,
   labFeedsAdapter,
+  arxivAdapter,
   githubReleasesAdapter
 ];
 

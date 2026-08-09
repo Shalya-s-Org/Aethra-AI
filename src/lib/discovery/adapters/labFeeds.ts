@@ -28,6 +28,19 @@ function configuredLabFeeds(): string[] {
   });
 }
 
+/** The hosts the configured lab feeds may produce (for canonical-URL
+ *  verification — candidates from a lab feed must live on the allowlisted
+ *  feed's own host). */
+export function labFeedHosts(): string[] {
+  return configuredLabFeeds().map(url => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return '';
+    }
+  }).filter(Boolean);
+}
+
 /** Pure parse — exported for offline fixture tests. */
 export function parseFeed(xml: string, sourceName: string): DiscoveredCandidate[] {
   const candidates: DiscoveredCandidate[] = [];

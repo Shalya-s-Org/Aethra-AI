@@ -16,25 +16,14 @@ import type { CandidateQueueLite, DiscoveryDecisionLite, PublishedPostLite } fro
 
 export const DashboardOverview: React.FC = () => {
   const {
-    memoryNodes,
-    countdown,
-    status,
-    currentActionDetails,
-    secondsSinceLastScan,
-    currentTaskName,
-    nextPublishCountdown,
-    rejectedTodayList,
-    lastDecisionTimeSeconds,
-    autonomousTimelineLogs,
-    novaLiveFocus,
     config,
-    activeTopic,
     discoveryDecisions,
     candidateQueue,
     memoryEntries,
     publishedPosts,
     sourceHealth,
     scheduledJob,
+    agentRuns,
     editorialThresholds,
     setActiveTab
   } = useAgent();
@@ -57,12 +46,11 @@ export const DashboardOverview: React.FC = () => {
     return map;
   }, [discoveryDecisions]);
 
-  const rejectedToday = useMemo(() => {
-    // Persisted rejected decisions (real, with human-readable reasons)
-    const real = discoveryDecisions.filter(d => d.decision === 'rejected').map(d => ({ title: d.title, reason: d.explanation }));
-    // Sim-engine rejected list (labeled as simulation when rendered)
-    return { real, sim: rejectedTodayList };
-  }, [discoveryDecisions, rejectedTodayList]);
+  // Persisted rejected decisions with human-readable reasons (real only).
+  const rejectedToday = useMemo(
+    () => discoveryDecisions.filter(d => d.decision === 'rejected').map(d => ({ title: d.title, reason: d.explanation })),
+    [discoveryDecisions]
+  );
 
   const toDrawerCandidate = (c: CandidateQueueLite): DecisionDrawerItem => ({
     kind: 'candidate',
@@ -112,12 +100,23 @@ export const DashboardOverview: React.FC = () => {
     };
   };
 
-  // Cycle through the engine's real timeline logs (falling back to the current
-  // action detail). Nothing here is invented on the client.
-  const activityMessages = useMemo(() => {
-    if (autonomousTimelineLogs.length > 0) return autonomousTimelineLogs.map(l => l.message);
-    return [currentActionDetails];
-  }, [autonomousTimelineLogs, currentActionDetails]);
+  // Real activity, derived from persisted records (agent_runs + published
+  // posts). Nothing here is invented on the client.
+  const realActivity = useMemo(() => {
+    const lines: Array<{ timestamp: string; message: string }> = [];
+    for (const run of agentRuns.slice(0, 8)) {
+      lines.push({ timestamp: timeAgo(run.startedAt), message: `Run ${run.status}${run.outcome ? ` — ${run.outcome}` : ''}` });
+    }
+    for (const post of publishedPosts.slice(0, 6)) {
+      lines.push({ timestamp: timeAgo(post.createdAt), message: `Published: ${post.title.slice(0, 64)}` });
+    }
+    return lines;
+  }, [agentRuns, publishedPosts]);
+
+  const activityMessages = useMemo(
+    () => (realActivity.length > 0 ? realActivity.map(l => l.message) : ['No runs recorded yet — waiting for the first scheduled cycle']),
+    [realActivity]
+  );
 
   useEffect(() => {
     if (activityMessages.length <= 1) return;
@@ -127,9 +126,13 @@ export const DashboardOverview: React.FC = () => {
 
   const nextCycleLabel = scheduledJob
     ? `Next cycle ${fmtCountdown(scheduledJob.nextRunAtMs)}`
-    : status === 'idle'
-      ? `Next ingest in ${countdown}s`
-      : 'Pipeline active';
+    : 'No scheduled job — init the agent to schedule recurring work';
+
+  // Real engine/runtime readouts (persisted records only).
+  const engineStatus = scheduledJob ? scheduledJob.status : 'unscheduled';
+  const lastRun = agentRuns[0] ?? null;
+  const lastDecisionAgo = discoveryDecisions.length > 0 ? timeAgo(discoveryDecisions[0].decidedAt) : '—';
+  const flowStep = (active: boolean, activeClass: string) => cn(active ? activeClass : 'bg-black/40 border-white/5 opacity-70');
 
   // Top metrics — all real persisted counts
   const editorialMetrics = useMemo(() => {
@@ -165,17 +168,7 @@ export const DashboardOverview: React.FC = () => {
     ];
   }, [candidateQueue.length, acceptanceRate, acceptedCount, totalDecisions, memoryEntries.length, realPosts.length, demoPosts.length]);
 
-  const isFlowActive = (blockName: string) => {
-    switch (blockName) {
-      case 'scanning': return status === 'scanning';
-      case 'filtering': return status === 'filtering';
-      case 'reasoning': return status === 'reasoning';
-      case 'writing': return status === 'writing' || status === 'memory_check';
-      case 'publishing': return status === 'publishing';
-      case 'learning': return status === 'learning';
-      default: return false;
-    }
-  };
+
 
   return (
     <div className="space-y-6">
@@ -194,7 +187,7 @@ export const DashboardOverview: React.FC = () => {
             exit={{ opacity: 0, y: -5 }}
             className="text-gray-300 font-mono italic"
           >
-            {`"${activityMessages[logIndex % activityMessages.length] ?? currentActionDetails}"`}
+            {`"${activityMessages[logIndex % activityMessages.length] ?? 'No activity yet'}"`}
           </motion.span>
         </div>
 
@@ -206,9 +199,9 @@ export const DashboardOverview: React.FC = () => {
           </span>
           <span className="text-white font-bold">● ENGINE ACTIVE</span>
           <span className="text-gray-700">|</span>
-          <span>Decision: <strong className="text-cyber-cyan">{lastDecisionTimeSeconds}s ago</strong></span>
+          <span>Last decision: <strong className="text-cyber-cyan">{lastDecisionAgo}</strong></span>
           <span className="text-gray-700">|</span>
-          <span>Next Ingest: <strong className="text-cyber-purple">{status !== 'idle' ? 'PAUSED' : `${countdown}s`}</strong></span>
+          <span>Next cycle: <strong className="text-cyber-purple">{scheduledJob ? fmtCountdown(scheduledJob.nextRunAtMs) : 'unscheduled'}</strong></span>
         </div>
       </div>
 
@@ -222,7 +215,7 @@ export const DashboardOverview: React.FC = () => {
           <div className="lg:col-span-2 space-y-3">
             <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full border border-cyber-cyan/35 bg-cyber-cyan/10 text-cyber-cyan font-mono text-[9px] tracking-wider uppercase font-semibold">
               <Activity className="w-3 h-3 text-cyan-400" />
-              {status !== 'idle' && status !== 'inactive' ? 'Pipeline Cycle In Progress' : nextCycleLabel}
+              {lastRun?.status === 'running' ? 'Scheduled run in progress' : nextCycleLabel}
             </div>
 
             <div>
@@ -230,7 +223,7 @@ export const DashboardOverview: React.FC = () => {
                 Current Mission
               </h2>
               <p className="font-display text-base font-bold text-white tracking-wide uppercase mt-1">
-                {currentTaskName}
+                {config.mission}
               </p>
             </div>
 
@@ -238,13 +231,13 @@ export const DashboardOverview: React.FC = () => {
               <div className="flex justify-between font-mono text-[9px] text-gray-400">
                 <span>Pipeline progress</span>
                 <span className="text-cyber-cyan font-semibold">
-                  {activeTopic ? 'Run in progress' : 'Idle — waiting for next cycle'}
+                  Idle — waiting for next scheduled cycle
                 </span>
               </div>
               <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
                 <div
-                  className={cn("h-full bg-gradient-to-r from-cyber-cyan to-cyber-purple transition-all duration-300", status !== 'idle' && "animate-pulse")}
-                  style={{ width: `${activeTopic ? 40 : 0}%` }}
+                  className="h-full bg-gradient-to-r from-cyber-cyan to-cyber-purple transition-all duration-300"
+                  style={{ width: '0%' }}
                 />
               </div>
             </div>
@@ -253,9 +246,9 @@ export const DashboardOverview: React.FC = () => {
           <div className="border-t lg:border-t-0 lg:border-l border-white/10 pt-4 lg:pt-0 lg:pl-6 space-y-3.5">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <span className="block text-[8px] text-gray-500 font-mono uppercase tracking-widest">Engine status</span>
+                <span className="block text-[8px] text-gray-500 font-mono uppercase tracking-widest">Scheduled job</span>
                 <span className="font-display text-[10px] text-white font-bold tracking-wider uppercase mt-1 block">
-                  {status}
+                  {engineStatus}
                 </span>
               </div>
               <div>
@@ -304,7 +297,7 @@ export const DashboardOverview: React.FC = () => {
         <div className="flex flex-col md:flex-row items-center justify-between gap-3 text-center md:text-left">
           <div className={cn(
             "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
-            isFlowActive('scanning') ? "bg-blue-500/10 border-blue-500/50" : "bg-black/40 border-white/5 opacity-70"
+            flowStep(candidateQueue.length > 0, "bg-blue-500/10 border-blue-500/50")
           )}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Candidates</div>
             <div className="font-display text-sm font-bold text-blue-400 mt-0.5">{candidateQueue.length}</div>
@@ -313,7 +306,7 @@ export const DashboardOverview: React.FC = () => {
 
           <div className={cn(
             "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
-            isFlowActive('filtering') ? "bg-cyber-red/10 border-cyber-red/50" : "bg-black/40 border-white/5 opacity-70"
+            flowStep(rejectedCount > 0, "bg-cyber-red/10 border-cyber-red/50")
           )}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Rejected</div>
             <div className="font-display text-sm font-bold text-cyber-red mt-0.5">{rejectedCount}</div>
@@ -322,7 +315,7 @@ export const DashboardOverview: React.FC = () => {
 
           <div className={cn(
             "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
-            isFlowActive('reasoning') ? "bg-yellow-500/10 border-yellow-500/50" : "bg-black/40 border-white/5 opacity-70"
+            flowStep(heldCount > 0, "bg-yellow-500/10 border-yellow-500/50")
           )}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Held</div>
             <div className="font-display text-sm font-bold text-yellow-400 mt-0.5">{heldCount}</div>
@@ -331,7 +324,7 @@ export const DashboardOverview: React.FC = () => {
 
           <div className={cn(
             "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
-            isFlowActive('writing') ? "bg-purple-500/10 border-purple-500/50" : "bg-black/40 border-white/5 opacity-70"
+            flowStep(acceptedCount > 0, "bg-purple-500/10 border-purple-500/50")
           )}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Accepted</div>
             <div className="font-display text-sm font-bold text-cyber-purple mt-0.5">{acceptedCount}</div>
@@ -340,7 +333,7 @@ export const DashboardOverview: React.FC = () => {
 
           <div className={cn(
             "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
-            isFlowActive('publishing') ? "bg-emerald-500/10 border-emerald-500/50" : "bg-black/40 border-white/5 opacity-70"
+            flowStep(realPosts.length > 0, "bg-emerald-500/10 border-emerald-500/50")
           )}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Published</div>
             <div className="font-display text-sm font-bold text-cyber-emerald mt-0.5">{realPosts.length}</div>
@@ -349,7 +342,7 @@ export const DashboardOverview: React.FC = () => {
 
           <div className={cn(
             "p-3 rounded border w-full md:w-auto md:flex-1 transition-all duration-300",
-            isFlowActive('learning') ? "bg-pink-500/10 border-pink-500/50" : "bg-black/40 border-white/5 opacity-70"
+            flowStep(memoryEntries.length > 0, "bg-pink-500/10 border-pink-500/50")
           )}>
             <div className="text-[8px] text-gray-500 uppercase font-mono tracking-wider">Memory</div>
             <div className="font-display text-sm font-bold text-pink-400 mt-0.5">{memoryEntries.length}</div>
@@ -357,7 +350,7 @@ export const DashboardOverview: React.FC = () => {
         </div>
       </div>
 
-      {/* 4. Neural Ingestion Pipeline */}
+      {/* 4. Real pipeline schematic (persisted counts) */}
       <PipelineVisualizer />
 
       {/* 5. Main Content Grid (3 Columns layout) */}
@@ -432,10 +425,10 @@ export const DashboardOverview: React.FC = () => {
               </div>
 
               <div className="space-y-2.5 max-h-[250px] overflow-y-auto pr-1">
-                {rejectedToday.real.length === 0 && rejectedToday.sim.length === 0 && (
+                {rejectedToday.length === 0 && (
                   <p className="text-[10px] text-gray-600 font-mono text-center py-6">No rejections recorded</p>
                 )}
-                {rejectedToday.real.map(rej => (
+                {rejectedToday.map(rej => (
                   <div key={`rej-${rej.title.slice(0, 40)}`} className="p-3 rounded bg-black/40 border border-cyber-red/10 text-[9px] space-y-2">
                     <div className="flex justify-between items-start gap-1">
                       <span className="font-display font-medium text-white leading-relaxed">{rej.title}</span>
@@ -444,17 +437,6 @@ export const DashboardOverview: React.FC = () => {
                       </span>
                     </div>
                     <p className="text-[8.5px] text-cyber-red leading-normal pl-2 border-l border-cyber-red/30">{rej.reason}</p>
-                  </div>
-                ))}
-                {rejectedToday.sim.map((rej, idx) => (
-                  <div key={`rejsim-${idx}-${rej.title.slice(0, 10)}`} className="p-3 rounded bg-black/40 border border-white/5 text-[9px] space-y-2">
-                    <div className="flex justify-between items-start gap-1">
-                      <span className="font-display font-medium text-gray-300 leading-relaxed">{rej.title}</span>
-                      <span className="px-1.5 py-0.2 rounded text-[7px] font-mono uppercase bg-gray-500/10 text-gray-400 border border-gray-500/20 flex-shrink-0">
-                        Sim
-                      </span>
-                    </div>
-                    <p className="text-[8.5px] text-gray-400 leading-normal pl-2 border-l border-white/10">{rej.reason}</p>
                   </div>
                 ))}
               </div>
@@ -480,7 +462,7 @@ export const DashboardOverview: React.FC = () => {
                     <div className="flex items-center gap-1.5">
                       {post.isDemo && (
                         <span className="font-mono text-[8px] text-yellow-400 bg-yellow-500/10 px-1.5 py-0.2 rounded font-bold border border-yellow-500/20">
-                          SIM
+                          DEMO
                         </span>
                       )}
                       {post.confidence != null && (
@@ -536,12 +518,12 @@ export const DashboardOverview: React.FC = () => {
             <div className="mb-3">
               <h4 className="font-display text-[9px] font-bold text-gray-500 uppercase tracking-widest flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-cyber-cyan" />
-                Engine Timeline Logs
+                Recent Activity · persisted records
               </h4>
             </div>
 
             <div className="space-y-2.5 max-h-[170px] overflow-y-auto pr-1 relative before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[1px] before:bg-white/5 pl-5 font-mono text-[9px]">
-              {autonomousTimelineLogs.map((log, idx) => (
+              {realActivity.map((log, idx) => (
                 <div key={`${log.timestamp}-${idx}`} className="relative">
                   <span className="absolute -left-[20.5px] top-1.5 w-1.5 h-1.5 rounded-full bg-cyber-cyan" />
                   <span className="text-gray-500 mr-1">{log.timestamp}</span> {log.message}
@@ -574,12 +556,12 @@ export const DashboardOverview: React.FC = () => {
 
               <div className="border-t border-white/5 pt-2 mt-2 space-y-1 text-gray-300 font-mono">
                 <div className="flex justify-between text-[8px] uppercase tracking-wider text-gray-500">
-                  <span>Agent Status</span>
-                  <span className="text-cyber-cyan">{status}</span>
+                  <span>Scheduled job</span>
+                  <span className="text-cyber-cyan">{engineStatus}</span>
                 </div>
-                <div><span className="text-cyber-cyan">Current Focus:</span> {novaLiveFocus.focus}</div>
-                <div><span className="text-cyber-cyan">Current Goal:</span> {novaLiveFocus.goal}</div>
-                <div><span className="text-cyber-cyan">Current Reasoning:</span> {novaLiveFocus.reasoning}</div>
+                <div><span className="text-cyber-cyan">Domain:</span> {config.domain}</div>
+                <div><span className="text-cyber-cyan">Role:</span> {config.role}</div>
+                <div><span className="text-cyber-cyan">Last run:</span> {lastRun ? `${lastRun.status} · ${timeAgo(lastRun.startedAt)}` : 'none yet'}</div>
               </div>
 
               <div className="grid grid-cols-2 gap-2 border-t border-white/5 pt-1.5 mt-1.5 text-[8px] uppercase tracking-wider">
@@ -716,10 +698,10 @@ export const DashboardOverview: React.FC = () => {
               Engine Runtime
             </h4>
             <div className="font-mono text-[9px] text-gray-400 space-y-1">
-              <div className="flex justify-between"><span>Status:</span><span className="text-cyber-cyan font-bold uppercase">{status}</span></div>
-              <div className="flex justify-between"><span>Last scan:</span><span className="text-white">{secondsSinceLastScan} seconds ago</span></div>
-              <div className="flex justify-between"><span>Memory nodes (sim):</span><span className="text-white">{memoryNodes.length}</span></div>
-              <div className="flex justify-between"><span>Next publication (sim):</span><span className="text-cyber-cyan font-bold">{nextPublishCountdown}</span></div>
+              <div className="flex justify-between"><span>Job status:</span><span className="text-cyber-cyan font-bold uppercase">{engineStatus}</span></div>
+              <div className="flex justify-between"><span>Last run:</span><span className="text-white">{lastRun ? `${lastRun.status} · ${timeAgo(lastRun.startedAt)}` : 'none yet'}</span></div>
+              <div className="flex justify-between"><span>Memory entries:</span><span className="text-white">{memoryEntries.length}</span></div>
+              <div className="flex justify-between"><span>Next cycle:</span><span className="text-cyber-cyan font-bold">{scheduledJob ? fmtCountdown(scheduledJob.nextRunAtMs) : 'unscheduled'}</span></div>
             </div>
           </GlassCard>
         </div>

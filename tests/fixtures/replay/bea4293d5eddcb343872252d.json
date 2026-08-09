@@ -1,0 +1,5 @@
+{
+  "url": "https://openai.com/news/rss.xml",
+  "status": 200,
+  "body": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<rss version=\"2.0\">\n  <channel>\n    <title>OpenAI News</title>\n    <link>https://openai.com/news/</link>\n    <description>OpenAI announcements</description>\n    <item>\n      <title>Security update: hardening the ChatGPT plugin sandbox</title>\n      <link>https://openai.com/news/security-sandbox-hardening/</link>\n      <description>We shipped hardening for the plugin execution sandbox and a security advisory for a prompt-injection vector.</description>\n      <pubDate>Mon, 20 Jul 2026 14:00:00 GMT</pubDate>\n    </item>\n    <item>\n      <title>Introducing new model capabilities for developers</title>\n      <link>https://openai.com/news/model-capabilities/</link>\n      <description>New API features for building agentic applications.</description>\n      <pubDate>Mon, 20 Jul 2026 12:00:00 GMT</pubDate>\n    </item>\n  </channel>\n</rss>"
+}

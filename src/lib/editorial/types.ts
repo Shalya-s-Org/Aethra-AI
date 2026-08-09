@@ -35,8 +35,15 @@ export interface EditorialFlags {
   /** Level-3 story overlap WITH meaningful new information (allowed). */
   meaningfulFollowUp?: { story: string; relation: EvidenceRelation };
   stale?: boolean;
+  /** The candidate's SOURCE is stale/down (persisted source health) — its
+   *  source-quality credit is capped. */
+  staleSource?: boolean;
   marketing?: boolean;
   unsupported?: boolean;
+  /** High-impact claim (CVE + explicit severity) from a non-primary source
+   *  without batch corroboration — held, never published on one secondary
+   *  source's say-so. */
+  unverifiedImpact?: string;
   /** Verified high-severity breaking-security item (CISA KEV / high-severity
    *  GitHub advisory, fresh, with an identifier). Bypasses thresholds and the
    *  routine interval/cap. */

@@ -1,15 +1,16 @@
 import { DatabaseSync } from 'node:sqlite';
-import fs from 'node:fs';
-import path from 'node:path';
 import type { BackendAgentInstance, EngineMeta } from './agentTypes';
 import { ulid } from './ids';
 import { titleHash } from './memory/similarity';
+import { sqliteStorage } from './storage';
 
-// Durable persistence via Node's built-in SQLite (node:sqlite — Node 24).
-// Zero extra dependencies, real SQL, WAL mode, and a versioned migration
-// runner (schema_migrations table) so the schema can evolve cleanly.
+// Synchronous DAO layer over the SQLite storage driver (src/lib/storage). The
+// connection, WAL pragmas, and the versioned migration registry live in the
+// storage module (schema_migrations tracks applied ids), so the schema is
+// shared with the Postgres driver. This DAO is SQLite-only by design; the
+// async StorageDriver interface is the path for Postgres deployments.
 //
-// Schema overview (see MIGRATIONS[0]):
+// Schema overview (see src/lib/storage/migrations.ts):
 //   agents               persona + engine timestamps + client snapshot blob
 //   topics               scanned candidate topics (canonical dedup key)
 //   sources              canonical HTTPS source URLs per topic
@@ -97,406 +98,41 @@ export interface RunRow {
 }
 
 // ---------------------------------------------------------------------------
-// Migrations
+// Migrations — the shared registry (one schema, SQLite + Postgres dialects)
+// lives in src/lib/storage/migrations.ts and is applied by the storage
+// drivers; applied ids are tracked in `schema_migrations`.
 // ---------------------------------------------------------------------------
 
-interface Migration {
-  id: string;
-  sql: string;
-}
-
-// v1: initial relational schema. Deliberately DROPs the old single-table
-// `agents` blob (pre-migration data is disposable hackathon state).
-const MIGRATIONS: Migration[] = [
-  {
-    id: '001_initial_relational_schema',
-    sql: `
-      DROP TABLE IF EXISTS agents;
-
-      CREATE TABLE agents (
-        id          TEXT PRIMARY KEY,
-        name        TEXT NOT NULL,
-        role        TEXT NOT NULL,
-        domain      TEXT NOT NULL,
-        mission     TEXT NOT NULL,
-        frequency   TEXT NOT NULL,
-        style       TEXT NOT NULL,
-        status      TEXT NOT NULL DEFAULT 'idle',
-        state_json  TEXT NOT NULL,
-        engine_json TEXT NOT NULL,
-        next_run_at INTEGER NOT NULL,
-        created_at  TEXT NOT NULL,
-        updated_at  TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_agents_due ON agents (next_run_at);
-
-      CREATE TABLE topics (
-        id                   TEXT PRIMARY KEY,
-        agent_id             TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-        title                TEXT NOT NULL,
-        canonical_source_url TEXT NOT NULL,
-        category             TEXT,
-        source_name          TEXT,
-        credibility_score    INTEGER,
-        trend_score          INTEGER,
-        novelty_score        INTEGER,
-        importance_score     INTEGER,
-        confidence_score     INTEGER,
-        recommendation       TEXT,
-        rejection_reason     TEXT,
-        detailed_analysis    TEXT,
-        opinion              TEXT,
-        freshness            TEXT,
-        raw_json             TEXT NOT NULL,
-        created_at           TEXT NOT NULL,
-        UNIQUE (agent_id, canonical_source_url)
-      );
-      CREATE INDEX IF NOT EXISTS idx_topics_agent_created ON topics (agent_id, created_at DESC);
-
-      CREATE TABLE sources (
-        id          TEXT PRIMARY KEY,
-        agent_id    TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-        topic_id    TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
-        url         TEXT NOT NULL,
-        source_name TEXT,
-        UNIQUE (agent_id, url)
-      );
-      CREATE INDEX IF NOT EXISTS idx_sources_topic ON sources (agent_id, topic_id);
-
-      CREATE TABLE posts (
-        id               TEXT PRIMARY KEY,
-        agent_id         TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-        topic_id         TEXT REFERENCES topics(id) ON DELETE SET NULL,
-        title            TEXT NOT NULL,
-        body             TEXT NOT NULL,
-        opinion          TEXT,
-        rationale        TEXT,
-        confidence_score INTEGER,
-        category         TEXT,
-        importance_score INTEGER,
-        novelty_score    INTEGER,
-        publication_id   TEXT,
-        published_at     TEXT NOT NULL,
-        UNIQUE (agent_id, topic_id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_posts_agent_published ON posts (agent_id, published_at DESC);
-
-      CREATE TABLE editorial_decisions (
-        id                TEXT PRIMARY KEY,
-        agent_id          TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-        topic_id          TEXT NOT NULL REFERENCES topics(id) ON DELETE CASCADE,
-        decision          TEXT NOT NULL CHECK (decision IN ('accept','reject')),
-        credibility_score INTEGER,
-        novelty_score     INTEGER,
-        importance_score  INTEGER,
-        confidence_score  INTEGER,
-        explanation       TEXT NOT NULL,
-        decided_at        TEXT NOT NULL,
-        UNIQUE (agent_id, topic_id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_decisions_agent_decided ON editorial_decisions (agent_id, decided_at DESC);
-
-      CREATE TABLE persona_memory (
-        id               TEXT PRIMARY KEY,
-        agent_id         TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-        node_label       TEXT NOT NULL,
-        node_group       TEXT NOT NULL,
-        details          TEXT,
-        connections_json TEXT NOT NULL,
-        created_at       TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_memory_agent ON persona_memory (agent_id, created_at DESC);
-
-      CREATE TABLE agent_runs (
-        id          TEXT PRIMARY KEY,
-        agent_id    TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-        topic_id    TEXT REFERENCES topics(id) ON DELETE SET NULL,
-        status      TEXT NOT NULL CHECK (status IN ('queued','running','completed','failed','skipped')),
-        outcome     TEXT,
-        started_at  TEXT NOT NULL,
-        finished_at TEXT,
-        error       TEXT,
-        created_at  TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_runs_agent_started ON agent_runs (agent_id, started_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_runs_agent_status ON agent_runs (agent_id, status);
-    `
-  },
-  {
-    id: '002_demo_posts_and_idempotency',
-    sql: `
-      -- Demo/seed posts are marked and excluded from the judged feed.
-      ALTER TABLE posts ADD COLUMN is_demo INTEGER NOT NULL DEFAULT 0;
-
-      -- Idempotency support for POST /api/agent/init: one row per
-      -- Idempotency-Key header, holding the stored response for replay.
-      CREATE TABLE init_requests (
-        idempotency_key TEXT PRIMARY KEY,
-        agent_id        TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-        response_json   TEXT NOT NULL,
-        status          INTEGER NOT NULL,
-        created_at      TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_init_requests_agent ON init_requests (agent_id);
-    `
-  },
-  {
-    id: '003_init_requests_nullable_agent',
-    // A claim row exists BEFORE the agent does, so agent_id must be nullable.
-    // (002 shipped with NOT NULL + a placeholder value that violated the FK.)
-    sql: `
-      DROP TABLE IF EXISTS init_requests;
-      CREATE TABLE init_requests (
-        idempotency_key TEXT PRIMARY KEY,
-        agent_id        TEXT REFERENCES agents(id) ON DELETE CASCADE,
-        response_json   TEXT NOT NULL,
-        status          INTEGER NOT NULL,
-        created_at      TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_init_requests_agent ON init_requests (agent_id);
-    `
-  },
-  {
-    id: '004_live_discovery',
-    // Live topic discovery (AI Security persona). Candidates are deduplicated
-    // by canonical https URL; per-fetch outcomes (success/failure) are kept so
-    // source reliability is auditable. Neither table feeds GET /api/agent/feed
-    // — the feed is a pure projection of posts.
-    sql: `
-      CREATE TABLE discovery_candidates (
-        id            TEXT PRIMARY KEY,
-        canonical_url TEXT NOT NULL UNIQUE,
-        title         TEXT NOT NULL,
-        summary       TEXT,
-        published_at  TEXT NOT NULL,
-        source_name   TEXT NOT NULL,
-        source_type   TEXT NOT NULL,
-        raw_evidence  TEXT NOT NULL,
-        fetched_at    TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_discovery_candidates_published
-        ON discovery_candidates (published_at DESC);
-
-      CREATE TABLE discovery_fetches (
-        id          TEXT PRIMARY KEY,
-        source_name TEXT NOT NULL,
-        source_type TEXT NOT NULL,
-        url         TEXT NOT NULL,
-        status      TEXT NOT NULL CHECK (status IN ('success','failure')),
-        item_count  INTEGER,
-        error       TEXT,
-        fetched_at  TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_discovery_fetches_source
-        ON discovery_fetches (source_name, fetched_at DESC);
-    `
-  },
-  {
-    id: '005_editorial_decisions',
-    // Deterministic editorial decisions over discovered candidates. One row per
-    // candidate (upserted on re-evaluation); every accepted/held/rejected
-    // outcome is persisted with its seven component scores and a
-    // human-readable explanation.
-    sql: `
-      CREATE TABLE discovery_decisions (
-        id                  TEXT PRIMARY KEY,
-        candidate_id        TEXT NOT NULL UNIQUE REFERENCES discovery_candidates(id) ON DELETE CASCADE,
-        decision            TEXT NOT NULL CHECK (decision IN ('accepted','held','rejected')),
-        total_score         INTEGER NOT NULL,
-        persona_relevance   INTEGER NOT NULL,
-        technical_impact    INTEGER NOT NULL,
-        source_quality      INTEGER NOT NULL,
-        recency             INTEGER NOT NULL,
-        novelty             INTEGER NOT NULL,
-        discussion_value    INTEGER NOT NULL,
-        evidence_confidence INTEGER NOT NULL,
-        explanation         TEXT NOT NULL,
-        decided_at          TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_decided
-        ON discovery_decisions (decided_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_decision
-        ON discovery_decisions (decision);
-    `
-  },
-  {
-    id: '006_durable_memory',
-    // Durable agent/persona memory + post-to-post links.
-    //   memory_entries  short-term / long-term / editorial memory, keyed by
-    //                   (COALESCE(agent_id,''), kind, subject). agent_id NULL
-    //                   = persona scope (the discovery/editorial pipeline); a
-    //                   real agent id = that agent's scope. UNIQUE via the
-    //                   expression index so NULL agent_ids still dedupe.
-    //   post_links      which earlier posts a new post relates to, and how
-    //                   (follow_up / confirms / updates / contradicts / related).
-    //   posts.title_hash  normalized-title hash for the level-2 duplicate
-    //                   check (exact normalized-title matches, indexable).
-    sql: `
-      CREATE TABLE memory_entries (
-        id            TEXT PRIMARY KEY,
-        agent_id      TEXT REFERENCES agents(id) ON DELETE CASCADE,
-        kind          TEXT NOT NULL CHECK (kind IN ('short_term','long_term','editorial')),
-        subject       TEXT NOT NULL,
-        content       TEXT NOT NULL,
-        importance    INTEGER NOT NULL DEFAULT 1,
-        occurrences   INTEGER NOT NULL DEFAULT 1,
-        metadata_json TEXT,
-        first_seen_at TEXT NOT NULL,
-        last_seen_at  TEXT NOT NULL,
-        created_at    TEXT NOT NULL
-      );
-      CREATE UNIQUE INDEX idx_memory_scope_subject
-        ON memory_entries (COALESCE(agent_id, ''), kind, subject);
-      CREATE INDEX idx_memory_scope_kind
-        ON memory_entries (agent_id, kind, last_seen_at DESC);
-
-      CREATE TABLE post_links (
-        id              TEXT PRIMARY KEY,
-        post_id         TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-        related_post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-        relation_type   TEXT NOT NULL CHECK (relation_type IN ('follow_up','confirms','updates','contradicts','related')),
-        similarity      REAL,
-        reason          TEXT,
-        created_at      TEXT NOT NULL,
-        UNIQUE (post_id, related_post_id, relation_type)
-      );
-      CREATE INDEX idx_post_links_post ON post_links (post_id);
-      CREATE INDEX idx_post_links_related ON post_links (related_post_id);
-
-      ALTER TABLE posts ADD COLUMN title_hash TEXT;
-      CREATE INDEX idx_posts_title_hash ON posts (title_hash);
-    `
-  },
-  {
-    id: '007_llm_generation',
-    // Server-side LLM post generation. Every accepted editorial decision may
-    // carry generated output; the status records whether generation succeeded
-    // (schema-validated JSON persisted) or failed (the decision was flipped to
-    // rejected rather than publishing weak content).
-    sql: `
-      ALTER TABLE discovery_decisions ADD COLUMN generated_json TEXT;
-      ALTER TABLE discovery_decisions ADD COLUMN generation_status TEXT NOT NULL DEFAULT 'none';
-      ALTER TABLE discovery_decisions ADD COLUMN generation_failure TEXT;
-      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_generation
-        ON discovery_decisions (generation_status);
-    `
-  },
-  {
-    id: '008_quality_gate',
-    // Pre-publication quality gate over generated drafts. Every decision that
-    // went through generation carries a gate verdict (passed/held/rejected)
-    // and the full check report; gate failures flip the decision to held
-    // (retry next run) or rejected (never publish weak content).
-    sql: `
-      ALTER TABLE discovery_decisions ADD COLUMN quality_json TEXT;
-      ALTER TABLE discovery_decisions ADD COLUMN quality_status TEXT NOT NULL DEFAULT 'pending';
-      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_quality
-        ON discovery_decisions (quality_status);
-    `
-  },
-  {
-    id: '009_durable_jobs',
-    // Durable autonomous orchestration.
-    //   scheduled_jobs       one recurring job per agent; occurrences are
-    //                        claimed with a DB-backed lease (lease_owner +
-    //                        lease_expires_at), so duplicate deliveries and
-    //                        crashed workers can never process the same
-    //                        occurrence twice. idempotency_key is stamped at
-    //                        claim time and identifies the occurrence across
-    //                        duplicate deliveries. attempts/max_attempts/
-    //                        backoff_ms give bounded exponential backoff for
-    //                        transient failures; exhausting attempts records a
-    //                        terminal failure and the recurring cadence
-    //                        continues.
-    //   posts.idempotency_key  delivery guard: UNIQUE(agent_id, idempotency_key)
-    //                        means a re-delivered occurrence can never publish
-    //                        the same decision twice.
-    //   discovery_decisions.published_post_id  global publication marker; a
-    //                        decision publishes at most once across agents.
-    sql: `
-      CREATE TABLE scheduled_jobs (
-        id               TEXT PRIMARY KEY,
-        agent_id         TEXT NOT NULL UNIQUE REFERENCES agents(id) ON DELETE CASCADE,
-        job_type         TEXT NOT NULL DEFAULT 'agent_cycle',
-        status           TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','terminal')),
-        schedule_ms      INTEGER NOT NULL,
-        next_run_at      INTEGER NOT NULL,
-        lease_owner      TEXT,
-        lease_expires_at INTEGER,
-        attempts         INTEGER NOT NULL DEFAULT 0,
-        max_attempts     INTEGER NOT NULL DEFAULT 5,
-        backoff_ms       INTEGER NOT NULL DEFAULT 1000,
-        idempotency_key  TEXT,
-        last_run_at      INTEGER,
-        last_error       TEXT,
-        created_at       TEXT NOT NULL,
-        updated_at       TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_due ON scheduled_jobs (status, next_run_at);
-      CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_lease ON scheduled_jobs (lease_expires_at);
-
-      ALTER TABLE posts ADD COLUMN idempotency_key TEXT;
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_idempotency
-        ON posts (agent_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
-
-      ALTER TABLE discovery_decisions ADD COLUMN published_post_id TEXT;
-      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_published
-        ON discovery_decisions (published_post_id);
-    `
-  }
-];
-
-function applyMigrations(db: DatabaseSync): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      id         TEXT PRIMARY KEY,
-      applied_at TEXT NOT NULL
-    )
-  `);
-  const applied = new Set(
-    db.prepare('SELECT id FROM schema_migrations').all().map(r => String(r.id))
-  );
-  for (const migration of MIGRATIONS) {
-    if (applied.has(migration.id)) continue;
-    db.exec('BEGIN');
-    try {
-      db.exec(migration.sql);
-      db.prepare('INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)').run(
-        migration.id,
-        new Date().toISOString()
-      );
-      db.exec('COMMIT');
-    } catch (err) {
-      db.exec('ROLLBACK');
-      throw err;
-    }
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Connection (lazy singleton; safe during `next build` and read-only FS)
+// Connection — owned by the SQLite storage driver (src/lib/storage/sqlite.ts),
+// which applies the shared migrations on first connect. The DAO layer is
+// SQLite-only; Postgres deployments go through the async StorageDriver
+// interface instead (see src/lib/storage).
 // ---------------------------------------------------------------------------
 
-let db: DatabaseSync | null = null;
-
+/** The synchronous DAO connection (lazy; safe during `next build`). */
 export function getDb(): DatabaseSync {
-  if (db) return db;
-  const dbPath = process.env.AETHRA_DB_PATH || path.join(process.cwd(), '.data', 'aethra.db');
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  const connection = new DatabaseSync(dbPath);
-  connection.exec('PRAGMA journal_mode = WAL;');
-  connection.exec('PRAGMA busy_timeout = 5000;');
-  connection.exec('PRAGMA foreign_keys = ON;');
-  applyMigrations(connection);
-  db = connection;
-  return connection;
+  assertSqliteStorage();
+  return sqliteStorage().raw();
 }
 
 /** Close the connection (used by tests to prove durability across reopen). */
 export function closeDb(): void {
-  if (db) {
-    db.close();
-    db = null;
+  sqliteStorage().closeSync();
+}
+
+/** The sync DAO must never silently run against a different store than the
+ *  one configured. Postgres needs the async StorageDriver layer; mixing the
+ *  two would write app data to a local file while the deployment expects a
+ *  shared database. */
+function assertSqliteStorage(): void {
+  const kind = (process.env.AETHRA_STORAGE ?? 'sqlite').toLowerCase();
+  if (kind !== 'sqlite') {
+    throw new Error(
+      `AETHRA_STORAGE=${process.env.AETHRA_STORAGE} is not supported by the synchronous DAO ` +
+        '(src/lib/db.ts). This DAO layer is SQLite-only; use the async StorageDriver ' +
+        '(src/lib/storage) for Postgres deployments.'
+    );
   }
 }
 
@@ -1211,6 +847,128 @@ export function getDiscoveryFetches(options: { limit?: number } = {}): Discovery
 }
 
 // ---------------------------------------------------------------------------
+// Source health (source_health) — one rolling row per source NAME
+// ---------------------------------------------------------------------------
+
+export interface SourceHealthRow {
+  sourceName: string;
+  sourceType: string;
+  url: string;
+  lastFetchAt: string | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastError: string | null;
+  lastItemCount: number | null;
+  consecutiveFailures: number;
+  successCount: number;
+  failureCount: number;
+  updatedAt: string;
+}
+
+export interface SourceHealthUpdate {
+  sourceName: string;
+  sourceType: string;
+  url: string;
+  /** True when at least one fetch for this source succeeded this run. */
+  succeeded: boolean;
+  /** Errors from this run's failed fetches (kept when nothing succeeded). */
+  error: string | null;
+  /** Total items across successful fetches this run. */
+  itemCount: number;
+  updatedAtMs: number;
+}
+
+/** Upsert one source's rolling health after a discovery run. */
+export function upsertSourceHealth(input: SourceHealthUpdate): void {
+  const at = iso(input.updatedAtMs);
+  const existing = getDb()
+    .prepare(`SELECT * FROM source_health WHERE source_name = ?`)
+    .get(input.sourceName) as Record<string, unknown> | undefined;
+
+  const successCount = existing ? Number(existing.success_count) : 0;
+  const failureCount = existing ? Number(existing.failure_count) : 0;
+  const consecutive = input.succeeded ? 0 : (existing ? Number(existing.consecutive_failures) : 0) + 1;
+
+  getDb()
+    .prepare(
+      `INSERT INTO source_health
+         (source_name, source_type, url, last_fetch_at, last_success_at, last_failure_at,
+          last_error, last_item_count, consecutive_failures, success_count, failure_count, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(source_name) DO UPDATE SET
+         source_type = excluded.source_type,
+         url = excluded.url,
+         last_fetch_at = excluded.last_fetch_at,
+         last_success_at = COALESCE(excluded.last_success_at, source_health.last_success_at),
+         last_failure_at = COALESCE(excluded.last_failure_at, source_health.last_failure_at),
+         last_error = excluded.last_error,
+         last_item_count = excluded.last_item_count,
+         consecutive_failures = excluded.consecutive_failures,
+         success_count = excluded.success_count,
+         failure_count = excluded.failure_count,
+         updated_at = excluded.updated_at`
+    )
+    .run(
+      input.sourceName,
+      input.sourceType,
+      input.url,
+      at,
+      input.succeeded ? at : null,
+      input.succeeded ? null : at,
+      input.succeeded ? null : input.error,
+      input.succeeded ? input.itemCount : null,
+      consecutive,
+      successCount + (input.succeeded ? 1 : 0),
+      failureCount + (input.succeeded ? 0 : 1),
+      at
+    );
+}
+
+export function getSourceHealth(): SourceHealthRow[] {
+  return getDb()
+    .prepare(
+      `SELECT source_name, source_type, url, last_fetch_at, last_success_at, last_failure_at,
+              last_error, last_item_count, consecutive_failures, success_count, failure_count, updated_at
+       FROM source_health ORDER BY source_name`
+    )
+    .all()
+    .map(r => ({
+      sourceName: String(r.source_name),
+      sourceType: String(r.source_type),
+      url: String(r.url),
+      lastFetchAt: r.last_fetch_at == null ? null : String(r.last_fetch_at),
+      lastSuccessAt: r.last_success_at == null ? null : String(r.last_success_at),
+      lastFailureAt: r.last_failure_at == null ? null : String(r.last_failure_at),
+      lastError: r.last_error == null ? null : String(r.last_error),
+      lastItemCount: r.last_item_count == null ? null : Number(r.last_item_count),
+      consecutiveFailures: Number(r.consecutive_failures),
+      successCount: Number(r.success_count),
+      failureCount: Number(r.failure_count),
+      updatedAt: String(r.updated_at)
+    }));
+}
+
+/** Posts published (non-demo) in the last `sinceMs` whose underlying discovery
+ *  candidate came from the given source type — the feed-diversity counter.
+ *  Joins posts → editorial_decisions (published_post_id) → discovery_candidates. */
+export function countPublishedBySourceType(
+  agentId: string,
+  sourceType: string,
+  sinceMs: number
+): number {
+  const row = getDb()
+    .prepare(
+      `SELECT COUNT(*) AS n
+       FROM posts p
+       JOIN discovery_decisions d ON d.published_post_id = p.id
+       JOIN discovery_candidates c ON c.id = d.candidate_id
+       WHERE p.agent_id = ? AND p.is_demo = 0 AND c.source_type = ? AND p.published_at >= ?`
+    )
+    .get(agentId, sourceType, iso(sinceMs)) as { n: number };
+  return Number(row.n);
+}
+
+// ---------------------------------------------------------------------------
 // Editorial decisions (discovery_decisions)
 // ---------------------------------------------------------------------------
 
@@ -1218,6 +976,8 @@ export type EditorialDecisionKind = 'accepted' | 'held' | 'rejected';
 
 export interface DiscoveryDecisionRow {
   id: string;
+  /** Owning agent (null only for pre-scoping rows; scoped queries never see them). */
+  agentId: string | null;
   candidateId: string;
   /** Candidate headline (joined from discovery_candidates). */
   title: string;
@@ -1246,6 +1006,8 @@ export interface DiscoveryDecisionRow {
 
 export interface DiscoveryDecisionInput {
   id: string;
+  /** The agent whose editorial pipeline produced this decision. */
+  agentId: string;
   candidateId: string;
   decision: EditorialDecisionKind;
   totalScore: number;
@@ -1273,17 +1035,18 @@ export interface DiscoveryDecisionInput {
   };
 }
 
-/** Upsert one decision per candidate (re-evaluation updates in place). */
+/** Upsert one decision per (agent, candidate) — re-evaluation updates in
+ *  place for the same agent only. */
 export function upsertDiscoveryDecision(input: DiscoveryDecisionInput): void {
   getDb()
     .prepare(
       `INSERT INTO discovery_decisions
-         (id, candidate_id, decision, total_score, persona_relevance, technical_impact,
+         (id, agent_id, candidate_id, decision, total_score, persona_relevance, technical_impact,
           source_quality, recency, novelty, discussion_value, evidence_confidence,
           explanation, decided_at, generated_json, generation_status, generation_failure,
           quality_json, quality_status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(candidate_id) DO UPDATE SET
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(agent_id, candidate_id) DO UPDATE SET
          decision = excluded.decision,
          total_score = excluded.total_score,
          persona_relevance = excluded.persona_relevance,
@@ -1303,6 +1066,7 @@ export function upsertDiscoveryDecision(input: DiscoveryDecisionInput): void {
     )
     .run(
       input.id,
+      input.agentId,
       input.candidateId,
       input.decision,
       input.totalScore,
@@ -1337,90 +1101,134 @@ function mapDiscoveryCandidateRow(row: Record<string, unknown>): DiscoveryCandid
   };
 }
 
-/** Candidates with no decision yet, or a held decision (retried each run). */
-export function getPendingDecisionCandidates(limit: number): DiscoveryCandidateRow[] {
+/** Candidates with no decision yet FOR THIS AGENT, or a held decision of this
+ *  agent (retried each run). The global candidate pool is fanned out per
+ *  agent: another agent's verdict never hides a candidate from this one. */
+export function getPendingDecisionCandidates(agentId: string, limit: number): DiscoveryCandidateRow[] {
   return getDb()
     .prepare(
       `SELECT dc.id, dc.canonical_url, dc.title, dc.summary, dc.published_at, dc.source_name,
               dc.source_type, dc.raw_evidence, dc.fetched_at
        FROM discovery_candidates dc
-       LEFT JOIN discovery_decisions dd ON dd.candidate_id = dc.id
+       LEFT JOIN discovery_decisions dd ON dd.candidate_id = dc.id AND dd.agent_id = ?
        WHERE dd.id IS NULL OR dd.decision = 'held'
        ORDER BY dc.published_at DESC
        LIMIT ?`
     )
-    .all(limit)
+    .all(agentId, limit)
     .map(r => mapDiscoveryCandidateRow(r as Record<string, unknown>));
 }
 
 /** Accepted candidates as short-term editorial memory (id, title, summary,
  *  canonical URL), newest first, bounded — the duplicate ladder's memory set
- *  for the persona scope. */
-export function getAcceptedDecisionCandidates(): Array<{
+ *  for one agent. Pass null for the legacy persona-global scope. */
+export function getAcceptedDecisionCandidates(agentId: string | null): Array<{
   id: string;
   title: string;
   summary: string;
   canonicalUrl: string;
 }> {
-  return getDb()
-    .prepare(
-      `SELECT dc.id, dc.title, dc.summary, dc.canonical_url
-       FROM discovery_candidates dc
-       JOIN discovery_decisions dd ON dd.candidate_id = dc.id
-       WHERE dd.decision = 'accepted'
-       ORDER BY dd.decided_at DESC
-       LIMIT 500`
-    )
-    .all()
-    .map(r => ({
-      id: String(r.id),
-      title: String(r.title),
-      summary: r.summary == null ? '' : String(r.summary),
-      canonicalUrl: String(r.canonical_url)
-    }));
+  const rows = agentId === null
+    ? getDb()
+        .prepare(
+          `SELECT dc.id, dc.title, dc.summary, dc.canonical_url
+           FROM discovery_candidates dc
+           JOIN discovery_decisions dd ON dd.candidate_id = dc.id
+           WHERE dd.decision = 'accepted'
+           ORDER BY dd.decided_at DESC
+           LIMIT 500`
+        )
+        .all()
+    : getDb()
+        .prepare(
+          `SELECT dc.id, dc.title, dc.summary, dc.canonical_url
+           FROM discovery_candidates dc
+           JOIN discovery_decisions dd ON dd.candidate_id = dc.id
+           WHERE dd.agent_id = ? AND dd.decision = 'accepted'
+           ORDER BY dd.decided_at DESC
+           LIMIT 500`
+        )
+        .all(agentId);
+  return rows.map(r => ({
+    id: String(r.id),
+    title: String(r.title),
+    summary: r.summary == null ? '' : String(r.summary),
+    canonicalUrl: String(r.canonical_url)
+  }));
 }
 
-/** Latest decided_at (ms) of an accepted decision within [sinceMs, now]; null if none. */
-export function getLatestAcceptedAtMs(sinceMs: number): number | null {
-  const row = getDb()
-    .prepare(
-      `SELECT MAX(decided_at) AS m FROM discovery_decisions
-       WHERE decision = 'accepted' AND decided_at >= ?`
-    )
-    .get(iso(sinceMs));
+/** Latest decided_at (ms) of THIS AGENT's accepted decision within [sinceMs,
+ *  now]; null if none. agentId null = legacy persona-global scope. */
+export function getLatestAcceptedAtMs(agentId: string | null, sinceMs: number): number | null {
+  const row = agentId === null
+    ? getDb()
+        .prepare(
+          `SELECT MAX(decided_at) AS m FROM discovery_decisions
+           WHERE decision = 'accepted' AND decided_at >= ?`
+        )
+        .get(iso(sinceMs))
+    : getDb()
+        .prepare(
+          `SELECT MAX(decided_at) AS m FROM discovery_decisions
+           WHERE agent_id = ? AND decision = 'accepted' AND decided_at >= ?`
+        )
+        .get(agentId, iso(sinceMs));
   if (!row || row.m == null) return null;
   const parsed = Date.parse(String(row.m));
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-/** Count of accepted decisions decided at or after sinceMs. */
-export function countAcceptedSinceMs(sinceMs: number): number {
-  const row = getDb()
-    .prepare(
-      `SELECT COUNT(*) AS n FROM discovery_decisions
-       WHERE decision = 'accepted' AND decided_at >= ?`
-    )
-    .get(iso(sinceMs));
+/** Count of THIS AGENT's accepted decisions decided at or after sinceMs.
+ *  agentId null = legacy persona-global scope. */
+export function countAcceptedSinceMs(agentId: string | null, sinceMs: number): number {
+  const row = agentId === null
+    ? getDb()
+        .prepare(
+          `SELECT COUNT(*) AS n FROM discovery_decisions
+           WHERE decision = 'accepted' AND decided_at >= ?`
+        )
+        .get(iso(sinceMs))
+    : getDb()
+        .prepare(
+          `SELECT COUNT(*) AS n FROM discovery_decisions
+           WHERE agent_id = ? AND decision = 'accepted' AND decided_at >= ?`
+        )
+        .get(agentId, iso(sinceMs));
   return Number((row as { n: number }).n);
 }
 
-/** True if any agent already published a real post for this canonical URL. */
-export function hasPublishedCanonicalUrl(url: string): boolean {
-  const row = getDb()
-    .prepare(
-      `SELECT 1 FROM posts p
-       JOIN topics t ON t.id = p.topic_id
-       WHERE p.is_demo = 0 AND t.canonical_source_url = ?
-       LIMIT 1`
-    )
-    .get(url);
+/** True if THIS AGENT already published a real post for this canonical URL
+ *  (deduplication is per-agent: one agent's publication never blocks another's
+ *  feed). agentId null = legacy persona-global scope. */
+export function hasPublishedCanonicalUrl(agentId: string | null, url: string): boolean {
+  const row = agentId === null
+    ? getDb()
+        .prepare(
+          `SELECT 1 FROM posts p
+           JOIN topics t ON t.id = p.topic_id
+           WHERE p.is_demo = 0 AND t.canonical_source_url = ?
+           LIMIT 1`
+        )
+        .get(url)
+    : getDb()
+        .prepare(
+          `SELECT 1 FROM posts p
+           JOIN topics t ON t.id = p.topic_id
+           WHERE p.agent_id = ? AND p.is_demo = 0 AND t.canonical_source_url = ?
+           LIMIT 1`
+        )
+        .get(agentId, url);
   return row != null;
 }
 
-export function getDiscoveryDecisions(options: { limit?: number; decision?: EditorialDecisionKind } = {}): DiscoveryDecisionRow[] {
+export function getDiscoveryDecisions(options: {
+  agentId?: string;
+  limit?: number;
+  decision?: EditorialDecisionKind;
+} = {}): DiscoveryDecisionRow[] {
   const limit = Math.min(500, options.limit ?? 100);
   let sql =
-    `SELECT dd.id, dd.candidate_id, dc.title, dc.canonical_url, dc.source_name, dc.source_type,
+    `SELECT dd.id, dd.agent_id, dd.candidate_id, dc.title, dc.canonical_url, dc.source_name, dc.source_type,
             dd.decision, dd.total_score, dd.persona_relevance,
             dd.technical_impact, dd.source_quality, dd.recency, dd.novelty, dd.discussion_value,
             dd.evidence_confidence, dd.explanation, dd.decided_at, dd.generated_json,
@@ -1429,10 +1237,16 @@ export function getDiscoveryDecisions(options: { limit?: number; decision?: Edit
      FROM discovery_decisions dd
      JOIN discovery_candidates dc ON dc.id = dd.candidate_id`;
   const args: Array<string | number> = [];
+  const where: string[] = [];
+  if (options.agentId !== undefined) {
+    where.push('dd.agent_id = ?');
+    args.push(options.agentId);
+  }
   if (options.decision) {
-    sql += ' WHERE dd.decision = ?';
+    where.push('dd.decision = ?');
     args.push(options.decision);
   }
+  if (where.length > 0) sql += ` WHERE ${where.join(' AND ')}`;
   sql += ' ORDER BY dd.decided_at DESC LIMIT ?';
   args.push(limit);
   return getDb()
@@ -1440,6 +1254,7 @@ export function getDiscoveryDecisions(options: { limit?: number; decision?: Edit
     .all(...args)
     .map(r => ({
       id: String(r.id),
+      agentId: r.agent_id == null ? null : String(r.agent_id),
       candidateId: String(r.candidate_id),
       title: String(r.title),
       candidateUrl: r.canonical_url == null ? null : String(r.canonical_url),
@@ -1465,29 +1280,42 @@ export function getDiscoveryDecisions(options: { limit?: number; decision?: Edit
     }));
 }
 
-/** Recently accepted decisions that carry generated output (draft openings
- *  and titles feed the quality gate's framing/variation checks). */
-export function getRecentGeneratedAccepted(limit = 20): Array<{
+/** Recently accepted decisions of one agent that carry generated output (draft
+ *  openings and titles feed the quality gate's framing/variation checks).
+ *  agentId null = legacy persona-global scope. */
+export function getRecentGeneratedAccepted(agentId: string | null, limit = 20): Array<{
   title: string;
   generatedJson: string;
   decidedAt: string;
 }> {
-  return getDb()
-    .prepare(
-      `SELECT dc.title, dd.generated_json, dd.decided_at
-       FROM discovery_decisions dd
-       JOIN discovery_candidates dc ON dc.id = dd.candidate_id
-       WHERE dd.decision = 'accepted' AND dd.generation_status = 'generated'
-         AND dd.generated_json IS NOT NULL
-       ORDER BY dd.decided_at DESC
-       LIMIT ?`
-    )
-    .all(limit)
-    .map(r => ({
-      title: String(r.title),
-      generatedJson: String(r.generated_json),
-      decidedAt: String(r.decided_at)
-    }));
+  const rows = agentId === null
+    ? getDb()
+        .prepare(
+          `SELECT dc.title, dd.generated_json, dd.decided_at
+           FROM discovery_decisions dd
+           JOIN discovery_candidates dc ON dc.id = dd.candidate_id
+           WHERE dd.decision = 'accepted' AND dd.generation_status = 'generated'
+             AND dd.generated_json IS NOT NULL
+           ORDER BY dd.decided_at DESC
+           LIMIT ?`
+        )
+        .all(limit)
+    : getDb()
+        .prepare(
+          `SELECT dc.title, dd.generated_json, dd.decided_at
+           FROM discovery_decisions dd
+           JOIN discovery_candidates dc ON dc.id = dd.candidate_id
+           WHERE dd.agent_id = ? AND dd.decision = 'accepted'
+             AND dd.generation_status = 'generated' AND dd.generated_json IS NOT NULL
+           ORDER BY dd.decided_at DESC
+           LIMIT ?`
+        )
+        .all(agentId, limit);
+  return rows.map(r => ({
+    title: String(r.title),
+    generatedJson: String(r.generated_json),
+    decidedAt: String(r.decided_at)
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1616,6 +1444,67 @@ export function getRecentMemoryEntries(opts: {
     )
     .all(opts.agentId ?? '', ...opts.kinds, opts.limit);
   return rows.map(mapMemoryEntryRow);
+}
+
+// Durable embeddings cache (migration 012): agent/persona-scoped vectors for
+// the duplicate ladder's level-4 semantic step. See src/lib/memory/embeddings.ts
+// for the provider that reads/writes these rows.
+
+export interface EmbeddingRow {
+  agentId: string | null;
+  contentKey: string;
+  model: string;
+  vector: number[];
+  createdAt: string;
+}
+
+function mapEmbeddingRow(r: Record<string, unknown>): EmbeddingRow {
+  return {
+    agentId: (r.agent_id as string | null) ?? null,
+    contentKey: r.content_key as string,
+    model: r.model as string,
+    vector: JSON.parse(r.vector_json as string) as number[],
+    createdAt: r.created_at as string
+  };
+}
+
+/** The cached embedding for (scope, content key, model), if any. */
+export function getEmbedding(
+  agentId: string | null,
+  contentKey: string,
+  model: string
+): EmbeddingRow | null {
+  const row = getDb()
+    .prepare(
+      `SELECT * FROM embeddings
+       WHERE COALESCE(agent_id, '') = COALESCE(?, '') AND content_key = ? AND model = ?`
+    )
+    .get(agentId ?? '', contentKey, model);
+  return row ? mapEmbeddingRow(row) : null;
+}
+
+/** Insert-or-replace an embedding for (scope, content key, model). */
+export function upsertEmbedding(input: {
+  agentId: string | null;
+  contentKey: string;
+  model: string;
+  vector: number[];
+  nowMs: number;
+}): void {
+  getDb()
+    .prepare(
+      `INSERT INTO embeddings (agent_id, content_key, model, vector_json, created_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (COALESCE(agent_id, ''), content_key, model)
+       DO UPDATE SET vector_json = excluded.vector_json, created_at = excluded.created_at`
+    )
+    .run(
+      input.agentId,
+      input.contentKey,
+      input.model,
+      JSON.stringify(input.vector),
+      iso(input.nowMs)
+    );
 }
 
 /** Recent real (non-demo) posts of an agent, with canonical source URLs —
@@ -1919,27 +1808,24 @@ export interface PublishableDecisionRow {
   totalScore: number;
 }
 
-/** Gate-passed, generated, accepted decisions that have not been published
- *  yet — the ONLY candidates for publication. */
-export function getPublishableDecisions(limit = 25): PublishableDecisionRow[] {
-  // The discovery/editorial pipeline is persona-global (one Ada persona):
-  // candidates and decisions carry no agent_id. Publication is per-agent but
-  // the global once-only guard (published_post_id) means a decision publishes
-  // at most once across all agents — the first agent's cycle to claim it wins.
+/** Gate-passed, generated, accepted decisions OF ONE AGENT that have not been
+ *  published yet — the ONLY candidates for that agent's publication. */
+export function getPublishableDecisions(agentId: string, limit = 25): PublishableDecisionRow[] {
   return getDb()
     .prepare(
       `SELECT dd.id AS decision_id, dd.candidate_id, dc.title, dc.canonical_url,
               dc.source_name, dc.source_type, dd.generated_json, dd.quality_json, dd.total_score
        FROM discovery_decisions dd
        JOIN discovery_candidates dc ON dc.id = dd.candidate_id
-       WHERE dd.decision = 'accepted'
+       WHERE dd.agent_id = ?
+         AND dd.decision = 'accepted'
          AND dd.generation_status = 'generated'
          AND dd.quality_status = 'passed'
          AND dd.published_post_id IS NULL
        ORDER BY dd.decided_at ASC
        LIMIT ?`
     )
-    .all(limit)
+    .all(agentId, limit)
     .map(r => ({
       decisionId: String(r.decision_id),
       candidateId: String(r.candidate_id),
@@ -1953,14 +1839,17 @@ export function getPublishableDecisions(limit = 25): PublishableDecisionRow[] {
     }));
 }
 
-/** Mark a decision as published (global once-only guard). Returns false if
- *  another worker already published it — callers roll back their transaction. */
-export function markDecisionPublished(decisionId: string, postId: string): boolean {
+/** Mark THIS AGENT's decision as published (per-agent once-only guard).
+ *  Returns false — and the caller must roll back — if the decision belongs to
+ *  another agent or another worker already published it. This is the hard
+ *  guarantee that one agent can never publish another agent's decision. */
+export function markDecisionPublished(agentId: string, decisionId: string, postId: string): boolean {
   const res = getDb()
     .prepare(
-      `UPDATE discovery_decisions SET published_post_id = ? WHERE id = ? AND published_post_id IS NULL`
+      `UPDATE discovery_decisions SET published_post_id = ?
+       WHERE id = ? AND agent_id = ? AND published_post_id IS NULL`
     )
-    .run(postId, decisionId);
+    .run(postId, decisionId, agentId);
   return res.changes === 1;
 }
 

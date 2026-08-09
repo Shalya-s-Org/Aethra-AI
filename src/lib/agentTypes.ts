@@ -127,20 +127,25 @@ export interface DiscoveryDecisionLite {
 // The dashboard renders these only; nothing here is synthesized client-side.
 // ---------------------------------------------------------------------------
 
-/** Per-source health aggregated from the durable discovery_fetches table. */
+/** Per-source health aggregated from the durable source_health table (rolling
+ *  per-source row updated by the discovery runner). */
 export interface SourceHealthLite {
   sourceName: string;
   sourceType: string;
   url: string;
-  /** Status of the latest fetch. */
+  /** Latest fetch outcome (from the runner's health upsert). */
   status: 'success' | 'failure';
+  /** Derived freshness: ok / stale (data older than the threshold) / down
+   *  (repeated failures or never proven working). */
+  freshness: 'ok' | 'stale' | 'down';
   itemCount: number | null;
   error: string | null;
-  fetchedAt: string; // ISO UTC
+  fetchedAt: string | null; // ISO UTC
   successCount: number;
   failureCount: number;
   lastSuccessAt: string | null;
   lastFailureAt: string | null;
+  consecutiveFailures: number;
 }
 
 /** One persisted discovery candidate with its editorial decision (if any). */
@@ -195,6 +200,13 @@ export interface MemoryEntryLite {
   occurrences: number;
   firstSeenAt: string; // ISO UTC
   lastSeenAt: string; // ISO UTC
+  /** Editorial-memory continuity: how the newest evidence relates to the
+   *  persona's prior stance (persisted in the entry's metadata). */
+  relation?: 'confirms' | 'updates' | 'contradicts';
+  /** Security identifiers (CVE/GHSA/arXiv) the entry is about (metadata). */
+  identifiers?: string[];
+  /** Persona recurring themes the entry touches (metadata). */
+  themes?: string[];
 }
 
 /** One post from the durable posts table (demo posts labeled, never hidden). */
@@ -261,4 +273,11 @@ export interface EngineMeta {
   nextPublishAt: number;
   lastDecisionAt: number;
   run: PipelineRun | null;
+  /**
+   * Secret ownership credential minted at init and returned to the caller in
+   * an `X-Agent-Ownership-Token` response header (never in the JSON body).
+   * Required to DELETE the agent; persisted in engine_json (internal — never
+   * serialized to the state/feed routes).
+   */
+  ownershipToken?: string;
 }

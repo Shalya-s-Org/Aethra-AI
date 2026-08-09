@@ -3,7 +3,7 @@
 import React, { useMemo } from 'react';
 import { useAgent } from '../../context/AgentContext';
 import { GlassCard } from '../ui/GlassCard';
-import { Radio, XCircle, Clock, ExternalLink } from 'lucide-react';
+import { Radio, XCircle, Clock, ExternalLink, AlertTriangle } from 'lucide-react';
 import { cn } from '../../utils/cn';
 import { fmtTime, timeAgo } from './format';
 
@@ -34,7 +34,7 @@ export const SourceHealthView: React.FC = () => {
           Source Health
         </h2>
         <p className="text-xs text-gray-500 uppercase tracking-widest font-mono mt-0.5">
-          Persisted discovery-fetch outcomes — no synthetic ratings
+          Persisted per-source health — freshness derived from real fetch outcomes
         </p>
       </div>
 
@@ -61,13 +61,21 @@ export const SourceHealthView: React.FC = () => {
       {sourceHealth.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-center border border-dashed border-white/5 rounded-xl bg-black/20">
           <Radio className="w-12 h-12 text-gray-600 mb-3" />
-          <p className="text-sm text-gray-400 uppercase tracking-wider font-semibold">No source fetches recorded</p>
+          <p className="text-sm text-gray-400 uppercase tracking-wider font-semibold">No source health recorded</p>
           <p className="text-xs text-gray-600 font-mono mt-1">Run the discovery runner (or the cron cycle) to populate source health</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {sourceHealth.map(source => (
-            <GlassCard key={source.sourceName} className="p-4" glowColor={source.status === 'success' ? 'emerald' : 'none'}>
+          {sourceHealth.map(source => {
+            const freshness = source.freshness ?? (source.status === 'success' ? 'ok' : 'down');
+            const badge =
+              freshness === 'ok'
+                ? { text: 'OK', cls: "bg-cyber-emerald/15 text-cyber-emerald border-cyber-emerald/30", glow: 'emerald' as const }
+                : freshness === 'stale'
+                  ? { text: 'STALE', cls: "bg-cyber-amber/15 text-cyber-amber border-cyber-amber/30", glow: 'none' as const }
+                  : { text: 'DOWN', cls: "bg-cyber-red/15 text-cyber-red border-cyber-red/30", glow: 'none' as const };
+            return (
+            <GlassCard key={source.sourceName} className="p-4" glowColor={badge.glow}>
               <div className="flex items-start justify-between gap-2 border-b border-white/5 pb-2 mb-2">
                 <div className="min-w-0">
                   <div className="font-display text-xs font-bold text-white uppercase tracking-wide truncate">
@@ -80,12 +88,10 @@ export const SourceHealthView: React.FC = () => {
                 <span
                   className={cn(
                     "px-1.5 py-0.5 rounded text-[8px] font-display uppercase tracking-widest font-bold border flex-shrink-0",
-                    source.status === 'success'
-                      ? "bg-cyber-emerald/15 text-cyber-emerald border-cyber-emerald/30"
-                      : "bg-cyber-red/15 text-cyber-red border-cyber-red/30"
+                    badge.cls
                   )}
                 >
-                  {source.status === 'success' ? 'OK' : 'DOWN'}
+                  {badge.text}
                 </span>
               </div>
 
@@ -115,6 +121,10 @@ export const SourceHealthView: React.FC = () => {
                   <span className="text-cyber-emerald">{source.successCount} / <span className={source.failureCount > 0 ? 'text-cyber-red' : 'text-white'}>{source.failureCount}</span></span>
                 </div>
                 <div className="flex justify-between">
+                  <span className="text-gray-500">Consecutive failures</span>
+                  <span className={source.consecutiveFailures > 0 ? 'text-cyber-red' : 'text-white'}>{source.consecutiveFailures}</span>
+                </div>
+                <div className="flex justify-between">
                   <span className="text-gray-500">Last success</span>
                   <span className="text-white">{source.lastSuccessAt ? timeAgo(source.lastSuccessAt) : '—'}</span>
                 </div>
@@ -126,14 +136,21 @@ export const SourceHealthView: React.FC = () => {
                   <span className="font-mono">{source.error}</span>
                 </div>
               )}
+              {freshness === 'stale' && !source.error && (
+                <div className="mt-2 flex items-start gap-1.5 p-2 rounded bg-cyber-amber/5 border border-cyber-amber/20 text-[8.5px] text-cyber-amber leading-normal">
+                  <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                  <span className="font-mono">Last successful fetch is older than the freshness threshold — data may be out of date</span>
+                </div>
+              )}
             </GlassCard>
-          ))}
+            );
+          })}
         </div>
       )}
 
       <p className="flex items-center gap-1.5 font-mono text-[9px] text-gray-500 uppercase tracking-widest">
         <Clock className="w-3 h-3 text-cyber-cyan" />
-        Health aggregates the last 200 persisted fetches per source
+        Freshness: ok = last success within threshold · stale = data older than threshold · down = repeated failures
       </p>
     </div>
   );

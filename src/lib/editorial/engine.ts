@@ -13,13 +13,17 @@ import { ulid } from '../ids';
 import { generatePost, createLlmProvider, type LlmProvider } from '../llm';
 import {
   countAcceptedSinceMs,
+  countPublishedBySourceType,
   getAcceptedDecisionCandidates,
+  getAgentRow,
   getLatestAcceptedAtMs,
   getPendingDecisionCandidates,
   getRecentGeneratedAccepted,
+  getSourceHealth,
   hasPublishedCanonicalUrl,
   upsertDiscoveryDecision
 } from '../db';
+import { unhealthySourceNames } from '../discovery/health';
 import { openingOf, runQualityGate, type QualityGateReport } from '../quality';
 import {
   gatherMemoryItems,
@@ -27,8 +31,10 @@ import {
   recordMemoryForAccepted,
   type RelevantMemory
 } from '../memory/memory';
+import { createSimilarityProvider } from '../memory/similarity';
 import { getPersona, type Persona } from '../persona';
 import {
+  candidateIdentifierText,
   extractCve,
   maxTitleSimilarity,
   scoreCandidate,
@@ -45,10 +51,26 @@ import {
 
 export const DEFAULT_ROUTINE_INTERVAL_MS = 6 * 3600_000;
 export const DEFAULT_DAILY_CAP = 4;
+/** Default cap on candidates from ONE source type per editorial run — a
+ *  flooding feed can never starve every other source out of the queue.
+ *  Overridable via AETHRA_DISCOVERY_MAX_PER_SOURCE. */
+export const DEFAULT_MAX_PER_SOURCE_TYPE = 6;
+/** Default max posts from ONE source type in the rolling 24h window — the
+ *  feed-diversity rule. Overridable via AETHRA_DIVERSITY_MAX_POSTS_PER_TYPE. */
+export const DEFAULT_DIVERSITY_MAX_POSTS_PER_TYPE = 2;
 const DUPLICATE_SIM_THRESHOLD = 0.85;
 const DAY_MS = 24 * 3600_000;
 
+function envInt(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
 export interface EditorialRunOptions {
+  /** The agent whose editorial pipeline this run is (its candidates are
+   *  scored, generated, gated, and persisted under this id). Required — the
+   *  pipeline is per-agent. */
+  agentId: string;
   /** Injectable for deterministic tests. */
   now?: number;
   /** Max candidates evaluated per run. */
@@ -57,6 +79,10 @@ export interface EditorialRunOptions {
   routineIntervalMs?: number;
   /** Max routine posts per rolling 24h (override-exempt). */
   dailyCap?: number;
+  /** Max candidates evaluated from ONE source type per run (intake diversity). */
+  maxPerSourceType?: number;
+  /** Max posts from ONE source type in the rolling 24h window (feed diversity). */
+  diversityMaxPostsPerType?: number;
   /** LLM provider for accepted-post generation. Defaults to the env-driven
    *  factory (deterministic local provider unless AETHRA_LLM_PROVIDER is set). */
   provider?: LlmProvider;
@@ -125,17 +151,33 @@ function buildExplanation(kind: DecisionKind, scored: ScoredCandidate, reasons: 
   return reasons.length > 0 ? `${prefix} ${reasons.join(' ')}` : prefix;
 }
 
-export async function runEditorial(options: EditorialRunOptions = {}): Promise<EditorialRunSummary> {
+export async function runEditorial(options: EditorialRunOptions): Promise<EditorialRunSummary> {
   const now = options.now ?? Date.now();
   const interval = options.routineIntervalMs ?? DEFAULT_ROUTINE_INTERVAL_MS;
   const cap = options.dailyCap ?? DEFAULT_DAILY_CAP;
   const limit = options.limit ?? 50;
+  const maxPerSourceType = options.maxPerSourceType ?? envInt('AETHRA_DISCOVERY_MAX_PER_SOURCE', DEFAULT_MAX_PER_SOURCE_TYPE);
+  const diversityMax = options.diversityMaxPostsPerType ?? envInt('AETHRA_DIVERSITY_MAX_POSTS_PER_TYPE', DEFAULT_DIVERSITY_MAX_POSTS_PER_TYPE);
   const runId = ulid(now);
   const startedAt = new Date(now).toISOString();
-  // The editorial pipeline is the AI Security persona's pipeline.
-  const persona: Persona = getPersona(null);
+  // The persona is resolved from the AGENT's own configuration, so every agent
+  // scores, prompts, and validates against its own persona definition.
+  const agent = getAgentRow(options.agentId);
+  const persona: Persona = getPersona(agent?.state.config.domain ?? null);
 
-  const pending = getPendingDecisionCandidates(limit);
+  // Intake diversity: fetch a superset of pending candidates and select at most
+  // `maxPerSourceType` per source type (newest first, deterministic), so one
+  // flooding feed can never monopolize the queue at the expense of the others.
+  const pendingPool = getPendingDecisionCandidates(options.agentId, Math.min(500, limit * 6));
+  const perType = new Map<string, number>();
+  const pending: typeof pendingPool = [];
+  for (const candidate of pendingPool) {
+    const seen = perType.get(candidate.sourceType) ?? 0;
+    if (seen >= maxPerSourceType) continue;
+    perType.set(candidate.sourceType, seen + 1);
+    pending.push(candidate);
+    if (pending.length >= limit) break;
+  }
   if (pending.length === 0) {
     return {
       runId,
@@ -149,25 +191,49 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
     };
   }
 
-  // Editorial memory: previously accepted candidates (novelty + duplicate base).
-  const acceptedMemory = getAcceptedDecisionCandidates();
+  // Editorial memory: this agent's previously accepted candidates (novelty +
+  // duplicate base) — another agent's accepts never leak into this ladder.
+  const acceptedMemory = getAcceptedDecisionCandidates(options.agentId);
   const memoryTitles = acceptedMemory.map(a => a.title);
 
-  // Durable memory (persona scope): one ladder run per candidate against the
-  // same gathered memory set, so the batch is deterministic.
-  const memoryItems = gatherMemoryItems(null);
+  // Source freshness: candidates from sources whose persisted health is
+  // stale/down earn capped source-quality credit (their claims aren't current).
+  const staleSources = unhealthySourceNames(getSourceHealth(), now);
+
+  // Durable memory (this agent's scope): one ladder run per candidate against
+  // the same gathered memory set, so the batch is deterministic. The similarity
+  // provider is created once per run, scoped to this agent, and warmed with the
+  // full memory + candidate set — a network embeddings provider embeds each
+  // unique title ONCE into the durable cache; failures degrade per-item to the
+  // lexical checks (the ladder still runs URL → title → keyword first).
+  const memoryItems = gatherMemoryItems(options.agentId, { source: 'decisions' });
+  const similarityProvider = createSimilarityProvider(options.agentId);
+  if (similarityProvider.warm) {
+    try {
+      await similarityProvider.warm([...memoryItems, ...pending]);
+    } catch {
+      // A failed warm-up must never block scoring — comparisons fall back to
+      // the deterministic lexical provider.
+    }
+  }
   const memoryByCandidate = new Map<string, RelevantMemory>();
   for (const candidate of pending) {
     memoryByCandidate.set(
       candidate.id,
-      getRelevantMemory(null, candidate, { items: memoryItems, persona })
+      getRelevantMemory(options.agentId, candidate, {
+        items: memoryItems,
+        persona,
+        provider: similarityProvider
+      })
     );
   }
 
-  // Corroboration: the same CVE in ≥ 2 candidates of this batch.
+  // Corroboration: the same CVE in ≥ 2 candidates of this batch, detected
+  // across the widest view (prose + canonical URL + raw record) so it agrees
+  // with the scorer's identifier detection.
   const cveCounts = new Map<string, number>();
   for (const candidate of pending) {
-    const cve = extractCve(textOf(candidate));
+    const cve = extractCve(candidateIdentifierText(candidate));
     if (cve) cveCounts.set(cve, (cveCounts.get(cve) ?? 0) + 1);
   }
   const corroborationCves = new Set([...cveCounts].filter(([, n]) => n >= 2).map(([c]) => c));
@@ -179,7 +245,8 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
       memoryTitles,
       corroborationCves,
       memory: memoryByCandidate.get(candidate.id),
-      persona
+      persona,
+      staleSources
     })
   );
   scored.sort(comparePriority);
@@ -194,7 +261,7 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
       s.flags.duplicateTitleSimilarity = maxTitleSimilarity(s.candidate.title, [dup]);
     }
     seenTitles.push(s.candidate.title);
-    if (hasPublishedCanonicalUrl(s.candidate.canonicalUrl)) {
+    if (hasPublishedCanonicalUrl(options.agentId, s.candidate.canonicalUrl)) {
       s.flags.duplicateUrl = s.candidate.canonicalUrl;
     }
   }
@@ -255,14 +322,28 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
       kind = 'rejected';
       reasons.push(`Near-duplicate of "${s.flags.memoryNearDuplicate}" (semantic similarity).`);
     } else if (s.total >= PUBLISH_THRESHOLD) {
-      kind = 'accepted';
-      reasons.push(`Score ${s.total} meets publish threshold ${PUBLISH_THRESHOLD}.`);
+      // High-impact claims (CVE + explicit severity) from a non-primary source
+      // never publish on one source's say-so — held until corroborated.
+      if (s.flags.unverifiedImpact) {
+        kind = 'held';
+        reasons.push(
+          `High-impact claim (${s.flags.unverifiedImpact}) from a non-primary source without corroboration — held until a primary advisory or a second source confirms it.`
+        );
+      } else {
+        kind = 'accepted';
+        reasons.push(`Score ${s.total} meets publish threshold ${PUBLISH_THRESHOLD}.`);
+      }
     } else if (s.total < REJECT_THRESHOLD) {
       kind = 'rejected';
       reasons.push(`Score ${s.total} below reject threshold ${REJECT_THRESHOLD}.`);
     } else {
       kind = 'held';
       reasons.push(`Score ${s.total} below publish threshold ${PUBLISH_THRESHOLD} (held for review).`);
+      if (s.flags.unverifiedImpact) {
+        reasons.push(
+          `High-impact claim (${s.flags.unverifiedImpact}) needs corroboration or a primary advisory before it can publish.`
+        );
+      }
     }
 
     // The breaking-security override rescues items the THRESHOLD would hold or
@@ -282,6 +363,11 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
         `Follow-up on "${s.flags.meaningfulFollowUp.story}" — ${s.flags.meaningfulFollowUp.relation} the prior stance with new information.`
       );
     }
+    if (s.flags.staleSource) {
+      reasons.push(
+        `Source ${s.candidate.sourceName} is stale or down (persisted source health) — its claims earn capped source-quality credit.`
+      );
+    }
     if (kind !== 'rejected') {
       const themes = themeHitsOf(persona, textOf(s.candidate));
       if (themes.length > 0) {
@@ -297,9 +383,12 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
   // a schema-validated post; the quality gate then decides pass (stays
   // accepted), hold (retry next run), or reject (never publish weak content).
   const provider = options.provider ?? createLlmProvider();
-  const recent = getRecentGeneratedAccepted(20);
+  const recent = getRecentGeneratedAccepted(options.agentId, 20);
   const recentTitles = recent.map(r => r.title);
-  const recentOpenings = recent.map(r => {
+  // Rolling openings: previously generated posts PLUS this batch's own drafts,
+  // so generation varies openings and the gate's variation check catches
+  // in-batch repetition too (never deterministic-template-looking output).
+  const rollingOpenings: string[] = recent.map(r => {
     try {
       return openingOf((JSON.parse(r.generatedJson) as { text?: string }).text ?? '');
     } catch {
@@ -318,6 +407,7 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
         score: e.scored.total,
         kind: e.kind
       })),
+      recentOpenings: rollingOpenings.filter(o => o.length > 0),
       provider
     });
     if (!outcome.ok) {
@@ -331,15 +421,19 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
     }
     entry.generation = { status: 'generated', json: outcome.raw };
 
+    // The gate compares against PRIOR openings (DB history + earlier drafts in
+    // this batch) — never the draft's own opening, which would trivially
+    // match itself. The opening joins the rolling set only after the gate.
     const report: QualityGateReport = runQualityGate({
       persona,
       candidate: entry.scored.candidate,
       draft: outcome.post,
       followUp: entry.scored.flags.meaningfulFollowUp,
       recentTitles,
-      recentOpenings,
+      recentOpenings: rollingOpenings.filter(o => o.length > 0),
       sourceQualityScore: entry.scored.components.sourceQuality
     });
+    rollingOpenings.push(openingOf(outcome.post.text));
     entry.quality = {
       status: report.verdict === 'pass' ? 'passed' : report.verdict === 'hold' ? 'held' : 'rejected',
       json: JSON.stringify(report)
@@ -356,15 +450,27 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
     }
   }
 
-  // Routine posting interval + daily cap, applied in deterministic priority
-  // order. Breaking-security overrides are exempt.
-  let lastAcceptedAt = getLatestAcceptedAtMs(now - interval);
-  let dailyCount = countAcceptedSinceMs(now - DAY_MS);
+  // Routine posting interval + daily cap + feed-diversity rule, applied in
+  // deterministic priority order, scoped to THIS agent (one agent's cadence
+  // never suppresses another's). Breaking-security overrides are exempt.
+  let lastAcceptedAt = getLatestAcceptedAtMs(options.agentId, now - interval);
+  let dailyCount = countAcceptedSinceMs(options.agentId, now - DAY_MS);
+  // Per-source-type published counts in the rolling 24h window (lazily loaded;
+  // in-run accepts count too, so a single run can't flood the feed with one
+  // source type).
+  const typeCounts = new Map<string, number>();
   for (const entry of entries) {
     if (entry.kind !== 'accepted' || entry.scored.flags.breakingSecurity) continue;
+    const sourceType = entry.scored.candidate.sourceType;
+    let typeCount = typeCounts.get(sourceType);
+    if (typeCount === undefined) {
+      typeCount = countPublishedBySourceType(options.agentId, sourceType, now - DAY_MS);
+      typeCounts.set(sourceType, typeCount);
+    }
+    const overTypeDiversity = typeCount >= diversityMax;
     const withinInterval = lastAcceptedAt !== null && now - lastAcceptedAt < interval;
     const overCap = dailyCount >= cap;
-    if (withinInterval || overCap) {
+    if (withinInterval || overCap || overTypeDiversity) {
       entry.kind = 'held';
       entry.reasons = entry.reasons.filter(r => !r.startsWith('Score '));
       const waitMin =
@@ -372,13 +478,16 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
           ? Math.max(1, Math.ceil((interval - (now - lastAcceptedAt)) / 60_000))
           : 0;
       entry.reasons.push(
-        overCap
-          ? `Rate-limited: daily cap of ${cap} routine posts reached.`
-          : `Rate-limited: next routine slot frees in ~${waitMin} min (minimum interval ${Math.round(interval / 3600_000)}h).`
+        overTypeDiversity
+          ? `Feed-diversity: source type ${sourceType} already has ${typeCount} post(s) in the last 24h (cap ${diversityMax}).`
+          : overCap
+            ? `Rate-limited: daily cap of ${cap} routine posts reached.`
+            : `Rate-limited: next routine slot frees in ~${waitMin} min (minimum interval ${Math.round(interval / 3600_000)}h).`
       );
     } else {
       lastAcceptedAt = now;
       dailyCount += 1;
+      typeCounts.set(sourceType, typeCount + 1);
     }
   }
 
@@ -399,6 +508,7 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
     };
     upsertDiscoveryDecision({
       id: decision.id,
+      agentId: options.agentId,
       candidateId: decision.candidateId,
       decision: decision.kind,
       totalScore: decision.totalScore,
@@ -413,7 +523,7 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
     // (persona scope), keyed to the story subject for follow-up accumulation,
     // and tagged with the persona's recurring themes.
     if (entry.kind === 'accepted') {
-      recordMemoryForAccepted(null, entry.scored.candidate, {
+      recordMemoryForAccepted(options.agentId, entry.scored.candidate, {
         nowMs: now,
         followUp: entry.scored.flags.meaningfulFollowUp
           ? {

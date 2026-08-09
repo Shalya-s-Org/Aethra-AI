@@ -29,6 +29,15 @@ const GENERIC: Persona = {
     styleAvoid: []
   },
   styleRules: ['Calm and precise.', 'Evidence-bound.'],
+  writingPatterns: {
+    openings: [
+      'The development is straightforward: {item}.',
+      'What changed is concrete: {item}.',
+      'The record for {item} is specific and traceable.'
+    ],
+    transitions: ['The operational consequence follows.', 'The technical takeaway is direct.'],
+    closings: ['The assessment rests on the cited evidence.', 'Confidence tracks the traceability of the sources.']
+  },
   postStructure: [
     { id: 'title', label: 'Title', description: 'Precise title.', terms: [], required: true },
     { id: 'summary', label: 'Summary', description: 'What happened.', terms: [], required: true }

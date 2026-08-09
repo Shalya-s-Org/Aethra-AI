@@ -6,13 +6,12 @@ import type {
   BackendAgentInstance,
   DiscoveryDecisionLite,
   EngineMeta,
+  MemoryEntryLite,
   PipelineRun,
-  PipelineStage,
-  SourceHealthLite
+  PipelineStage
 } from './agentTypes';
 import {
   generateServerUUID,
-  getInitialSeedMemory,
   getInitialSeedPosts,
   selectPoolForDomain
 } from './pools';
@@ -22,7 +21,7 @@ import {
   getAgentRow,
   getDiscoveryCandidates,
   getDiscoveryDecisions,
-  getDiscoveryFetches,
+  getSourceHealth,
   getMemoryNodesByAgent,
   getPostLinks,
   getPostsByAgent,
@@ -37,7 +36,6 @@ import {
   insertPost,
   insertRun,
   insertSource,
-  listDueAgentIds,
   putAgentRow,
   updateRun,
   upsertTopicRow,
@@ -45,24 +43,28 @@ import {
 } from './db';
 import { DEFAULT_DAILY_CAP, DEFAULT_ROUTINE_INTERVAL_MS } from './editorial/engine';
 import { PUBLISH_THRESHOLD, REJECT_THRESHOLD } from './editorial/types';
-import { ulid } from './ids';
+import { computeSourceStatus } from './discovery/health';
+import { sourceTypeRank } from './discovery/sourceTypes';
+import { generateOwnershipToken, ulid } from './ids';
 import { linkRelatedPosts, recordMemoryForAccepted } from './memory';
+import { timingSafeEqualString } from './security';
 import { getPersona, validatePost } from './persona';
 import { canonicalizeSourceUrl } from './urls';
 
 // ---------------------------------------------------------------------------
 // Durable autonomous-agent engine.
 //
-// The simulation is a *persisted, time-based state machine*: SQLite holds each
-// agent's snapshot blob + engine timestamps, and the multi-stage pipeline is
-// advanced against the wall clock (no setInterval/setTimeout drives it).
+// The legacy sim stage machine (advanceTo / advanceAgentById) is a persisted,
+// time-based state machine kept for TESTS ONLY: it is never advanced in
+// production. The real pipeline is the discovery → editorial → quality gate →
+// publication cycle (src/lib/jobs/cycle.ts), whose durable records (agent_runs,
+// posts, decisions, fetches, memory_entries) drive every dashboard readout.
 //
 // Content entities live in their own relational tables:
 //   topics / sources / posts / editorial_decisions / persona_memory / agent_runs
-// The engine writes them at the moment content is created (scan → decision →
-// publish), and duplicate publication of the same canonical topic/source per
-// agent is prevented twice: by an engine-level pre-check and by UNIQUE
-// constraints in the schema. Posts carry ULID ids and ISO-8601 UTC timestamps.
+// Posts carry ULID ids and ISO-8601 UTC timestamps; duplicate publication of
+// the same canonical topic/source per agent is prevented by UNIQUE constraints
+// in the schema (plus the pipeline's own pre-checks).
 // ---------------------------------------------------------------------------
 
 // ---- Cadence helpers (same semantics as the original demo scheduler) ----
@@ -84,13 +86,13 @@ const buildStagesFor = (topic: Topic, domain: string): PipelineStage[] => {
     { status: 'scanning', durationMs: 1500, details: "Observe: Ingesting code commits and RSS paper streams..." },
     { status: 'filtering', durationMs: 1800, details: "Purge: Sifting out consumer hype wrappers and unverified rumors..." },
     { status: 'reasoning', durationMs: 2200, details: `Evaluate: Scoring impact criteria for ${domain} relevance...` },
-    { status: 'memory_check', durationMs: 1500, details: "Compare: Running cosine similarity checks against past memory..." }
+    { status: 'memory_check', durationMs: 1500, details: "Compare: Running the duplicate-detection ladder against durable memory..." }
   ];
   if (topic.recommendation === 'Accept') {
     stages.push(
       { status: 'writing', durationMs: 2500, details: "Synthesize: Formulating systems-centric critique and summary draft..." },
       { status: 'publishing', durationMs: 1500, details: "Share: Signing release parameters & broadcasting to registry..." },
-      { status: 'learning', durationMs: 1500, details: "Learn: Indexing node entities and updating neural weight connections..." }
+      { status: 'learning', durationMs: 1500, details: "Learn: Recording durable editorial memory for the accepted story..." }
     );
   } else {
     stages.push(
@@ -101,10 +103,12 @@ const buildStagesFor = (topic: Topic, domain: string): PipelineStage[] => {
   return stages;
 };
 
+// Honest default "focus" readout: the agent has no in-flight work of its own
+// between scheduled cycles, so the focus reflects what it is configured to do.
 const defaultFocus = (domain: string): AgentFocus => ({
-  focus: "Observing AI Ecosystem",
-  goal: "Ingest live research datasets",
-  reasoning: `Monitoring arXiv, GitHub, and trusted streams for ${domain}`,
+  focus: `Monitoring ${domain} streams`, // the discovery allowlist
+  goal: "Awaiting the next scheduled cycle (external cron)",
+  reasoning: "Real pipeline activity is recorded in agent_runs, posts, and discovery_fetches",
   estimatedCompletionSeconds: 0
 });
 
@@ -124,7 +128,7 @@ const focusForStage = (status: AgentStatus, topic: { title: string }, domain: st
     case 'reasoning':
       return { focus: `Scoring ${topic.title.slice(0, 30)}`, goal: "Assess engineering impact and utility", reasoning: "Running heuristic matrix evaluation algorithms", estimatedCompletionSeconds };
     case 'memory_check':
-      return { focus: "Querying Vector Memory", goal: "Avoid topic repetition collisions", reasoning: "Measuring cosine distance to historical indices", estimatedCompletionSeconds };
+      return { focus: "Reconciling with prior editorial memory", goal: "Avoid topic repetition collisions", reasoning: "Keyword/token duplicate ladder against durable memory (no embeddings)", estimatedCompletionSeconds };
     case 'writing':
       return { focus: "Drafting System Summaries", goal: "Establish opinionated engineering critiques", reasoning: "Extracting system dependencies", estimatedCompletionSeconds };
     case 'publishing':
@@ -188,7 +192,7 @@ function enterStage(state: BackendAgentInstance, run: PipelineRun, now: number):
     state.pipelineStats.publishCount += 1;
     pushCapped(state.autonomousTimelineLogs, { timestamp: timeStr, message: `Published post: ${topic.title.slice(0, 35)}...` }, MAX_TIMELINE_LOGS);
   } else if (stage.status === 'learning') {
-    pushCapped(state.autonomousTimelineLogs, { timestamp: timeStr, message: "Synthesized graph relationships & updated index nodes." }, MAX_TIMELINE_LOGS);
+    pushCapped(state.autonomousTimelineLogs, { timestamp: timeStr, message: "Recorded durable memory for the accepted story." }, MAX_TIMELINE_LOGS);
   }
 }
 
@@ -549,22 +553,18 @@ export function initializeAgentInstance(
     missionProgress: 0, // derived
     currentTaskName: `Observing ${domain} ecosystem`,
     nextPublishSeconds: 0, // derived
-    pipelineStats: { scanCount: 17, filterCount: 9, reasonCount: 8, memoryCount: 1, writeCount: 1, publishCount: 1 },
+    // No fabricated counters: real pipeline counts come from the persisted
+    // tables (peekAgentState fills candidateQueue/decisions/posts/runs).
+    pipelineStats: { scanCount: 0, filterCount: 0, reasonCount: 0, memoryCount: 0, writeCount: 0, publishCount: 0 },
     discoveredTopics: topicPool.slice(0, 3),
     posts: seedPosts,
-    memoryNodes: getInitialSeedMemory(domain),
+    memoryNodes: [], // legacy sim field; real memory is memory_entries
     decisions: [],
-    rejectedTodayList: [
-      { title: "Trending AI coin generator and cat memes", reason: "Rejected: Outside criteria. Low technical engineering significance." },
-      { title: "VC Fund announces generic chatbot raising $50M", reason: "Rejected: Low novelty. Consumer wrapper app fundraising." }
-    ],
+    rejectedTodayList: [], // real rejections come from discovery_decisions
     activeTopic: null,
     pipelineProgress: 0,
     lastDecisionTimeSeconds: 0, // derived
-    autonomousTimelineLogs: [
-      { timestamp: "08:00", message: `Agent registry online. Watching ${domain} streams.` },
-      { timestamp: "08:02", message: "Scanned incoming sources. Filtered 7 low-credibility records." }
-    ],
+    autonomousTimelineLogs: [], // legacy sim field; real activity comes from agent_runs/posts
     novaLiveFocus: defaultFocus(domain),
     // Real persisted-pipeline data is empty until the discovery/editorial
     // pipeline runs; the state read (peekAgentState) fills these from SQLite.
@@ -589,7 +589,11 @@ export function initializeAgentInstance(
     nextRunAt: now + demoScaledCadenceSeconds(frequency) * 1000,
     nextPublishAt: now + nextPublishResetSeconds(frequency) * 1000,
     lastDecisionAt: now - 12000, // -> lastDecisionTimeSeconds = 12
-    run: null
+    run: null,
+    // Secret ownership credential returned to the caller in an init response
+    // header; required to DELETE the agent (see destroyAgent). Persisted in
+    // engine_json only — never serialized to the client-facing state.
+    ownershipToken: generateOwnershipToken()
   };
 
   // Create the agent atomically: the row plus all seed content rows. A crash
@@ -646,17 +650,8 @@ export function initializeAgentInstance(
       });
     }
 
-    for (const node of getInitialSeedMemory(domain)) {
-      insertMemoryNode({
-        id: node.id,
-        agentId,
-        nodeLabel: node.label,
-        nodeGroup: node.group,
-        details: node.details,
-        connections: node.connections,
-        createdAtMs: now
-      });
-    }
+    // Deliberately no seed memory nodes: persona_memory is written only by the
+    // legacy sim (test-only). The real durable memory lives in memory_entries.
   });
 
   return snapshotAgent(state, engine, now);
@@ -680,14 +675,6 @@ export function advanceAgentById(
   return snapshotAgent(row.state, row.engine, now);
 }
 
-// Advance every due agent (the scheduler's durable job loop). Returns how many
-// agents were due. Idempotent and safe to call from any trigger.
-export function flushDueAgents(now: number = Date.now()): number {
-  const due = listDueAgentIds(now);
-  for (const agentId of due) advanceAgentById(agentId, now);
-  return due.length;
-}
-
 // Pure read: snapshot an agent WITHOUT writing anything. Used by GET /feed's
 // sibling state and by the state route after flushing. Attaches the
 // discovery-pipeline editorial decisions (with quality-gate results) and the
@@ -701,7 +688,8 @@ export function peekAgentState(agentId: string, now: number = Date.now()): Backe
   const state = snapshotAgent(row.state, row.engine, now);
 
   // --- Discovery-pipeline editorial decisions (with score breakdown) ---
-  const decisions = getDiscoveryDecisions({ limit: 20 });
+  // Scoped to this agent: the dashboard never shows another agent's verdicts.
+  const decisions = getDiscoveryDecisions({ agentId, limit: 20 });
   state.discoveryDecisions = decisions.map(r => ({
     id: r.id,
     candidateId: r.candidateId,
@@ -746,36 +734,34 @@ export function peekAgentState(agentId: string, now: number = Date.now()): Backe
     };
   });
 
-  // --- Source health: aggregated from the durable discovery_fetches table ---
-  const fetches = getDiscoveryFetches({ limit: 200 });
-  const bySource = new Map<string, SourceHealthLite>();
-  for (const f of fetches) {
-    let agg = bySource.get(f.sourceName);
-    if (!agg) {
-      agg = {
-        sourceName: f.sourceName,
-        sourceType: f.sourceType,
-        url: f.url,
-        status: f.status,
-        itemCount: f.itemCount,
-        error: f.error,
-        fetchedAt: f.fetchedAt,
-        successCount: 0,
-        failureCount: 0,
-        lastSuccessAt: null,
-        lastFailureAt: null
+  // --- Source health: the durable source_health table (one rolling row per
+  //     source, updated by the discovery runner), with derived freshness ---
+  const healthRows = getSourceHealth();
+  state.sourceHealth = healthRows
+    .map(h => {
+      const freshness = computeSourceStatus(h, now);
+      return {
+        sourceName: h.sourceName,
+        sourceType: h.sourceType,
+        url: h.url,
+        status: (freshness === 'down' ? 'failure' : 'success') as 'success' | 'failure',
+        freshness,
+        itemCount: h.lastItemCount,
+        error: h.lastError,
+        fetchedAt: h.lastFetchAt,
+        successCount: h.successCount,
+        failureCount: h.failureCount,
+        lastSuccessAt: h.lastSuccessAt,
+        lastFailureAt: h.lastFailureAt,
+        consecutiveFailures: h.consecutiveFailures
       };
-      bySource.set(f.sourceName, agg);
-    }
-    if (f.status === 'success') {
-      agg.successCount += 1;
-      if (agg.lastSuccessAt == null) agg.lastSuccessAt = f.fetchedAt;
-    } else {
-      agg.failureCount += 1;
-      if (agg.lastFailureAt == null) agg.lastFailureAt = f.fetchedAt;
-    }
-  }
-  state.sourceHealth = [...bySource.values()].sort((a, b) => b.fetchedAt.localeCompare(a.fetchedAt));
+    })
+    .sort((a, b) => {
+      // Primary sources first, then most-recently updated.
+      const rankDiff = sourceTypeRank(b.sourceType) - sourceTypeRank(a.sourceType);
+      if (rankDiff !== 0) return rankDiff;
+      return (b.fetchedAt ?? '').localeCompare(a.fetchedAt ?? '');
+    });
 
   // --- Agent run history + the durable scheduled job ---
   state.agentRuns = getRunsByAgent(agentId)
@@ -820,7 +806,13 @@ export function peekAgentState(agentId: string, now: number = Date.now()): Backe
     importance: e.importance,
     occurrences: e.occurrences,
     firstSeenAt: e.firstSeenAt,
-    lastSeenAt: e.lastSeenAt
+    lastSeenAt: e.lastSeenAt,
+    // Editorial-memory continuity, persisted in the entry's metadata: how the
+    // newest evidence relates to the persona's prior stance on this subject,
+    // plus the identifiers and themes the record touches.
+    relation: e.metadata.relation as MemoryEntryLite['relation'],
+    identifiers: Array.isArray(e.metadata.identifiers) ? (e.metadata.identifiers as string[]) : undefined,
+    themes: Array.isArray(e.metadata.themes) ? (e.metadata.themes as string[]) : undefined
   }));
 
   // --- Published posts (durable posts table; demo/seed posts labeled) ---
@@ -881,9 +873,25 @@ export function peekAgentState(agentId: string, now: number = Date.now()): Backe
 }
 
 // Evict an agent durably (CASCADE removes its topics/sources/posts/decisions/
-// memory/runs). Idempotent: deleting a ghost is a no-op.
-export function destroyAgent(agentId: string): void {
+// memory/runs). Requires the ownership credential minted at init: agent ids
+// alone can never delete work. Returns false (caller maps to 404) when the
+// agent is unknown OR the token does not match — never distinguishing the two,
+// so a caller without the correct token learns nothing about existence.
+export function destroyAgent(agentId: string, ownershipToken: string): boolean {
+  const row = getAgentRow(agentId);
+  if (!row) return false;
+  const expected = row.engine.ownershipToken;
+  if (!expected || !timingSafeEqualString(ownershipToken, expected)) return false;
   deleteAgentRow(agentId);
+  return true;
+}
+
+/** The agent's ownership credential, for the init route to hand out (null
+ *  when the agent does not exist — pre-token rows cannot be deleted via the
+ *  API and must be removed by an operator). */
+export function getOwnershipToken(agentId: string): string | null {
+  const row = getAgentRow(agentId);
+  return row?.engine.ownershipToken ?? null;
 }
 
 // Expose memory lookup for tests/audit.

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getJobQueue } from '../../../../lib/jobs';
+import { redactSecrets, timingSafeEqualString } from '../../../../lib/security';
 
 // The external cron/queue trigger for the durable job queue. Invoked by a
 // scheduler OUTSIDE this process — Vercel Cron (x-vercel-cron header), a
@@ -17,9 +18,9 @@ export async function POST(request: Request) {
   const secret = process.env.AETHRA_CRON_SECRET;
   if (secret) {
     const auth = request.headers.get('authorization') ?? '';
-    const expected = `Bearer ${secret}`;
-    const presented = auth.trim();
-    const ok = presented.length > 0 && presented === expected;
+    // Constant-time comparison: never reveal timing or length information
+    // about the secret via a string equality check.
+    const ok = timingSafeEqualString(auth.trim(), `Bearer ${secret}`);
     if (!ok) {
       return NextResponse.json({ error: 'Unauthorized cron invocation.' }, { status: 401 });
     }
@@ -31,8 +32,12 @@ export async function POST(request: Request) {
     const summary = await getJobQueue().processDueJobs();
     return NextResponse.json(summary);
   } catch (err) {
+    // Never echo raw error internals (which may embed URLs, credentials, or
+    // fetched content) to the caller; the full detail is logged server-side.
     const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: `Cron tick failed: ${message}` }, { status: 500 });
+    const detail = redactSecrets(message);
+    console.error('Cron tick failed:', detail);
+    return NextResponse.json({ error: 'Cron tick failed.' }, { status: 500 });
   }
 }
 

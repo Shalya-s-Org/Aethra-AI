@@ -48,6 +48,15 @@ export function isUlid(value: string): boolean {
   return ULID_RE.test(value);
 }
 
+/**
+ * Opaque ownership credential (192 bits, base64url) minted at agent init and
+ * required to DELETE the agent. High entropy, URL-safe, never derived from
+ * the agent id, and never serialized to the state/feed routes.
+ */
+export function generateOwnershipToken(): string {
+  return randomBytes(24).toString('base64url');
+}
+
 /** Decode the embedded 48-bit timestamp (ms) of a ULID. */
 export function ulidTimestamp(value: string): number | null {
   if (!isUlid(value)) return null;

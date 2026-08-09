@@ -51,7 +51,7 @@ describe('migrations', () => {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
       .all()
       .map(r => String(r.name));
-    for (const t of ['agents', 'topics', 'sources', 'posts', 'editorial_decisions', 'persona_memory', 'agent_runs', 'discovery_candidates', 'discovery_fetches', 'schema_migrations']) {
+    for (const t of ['agents', 'topics', 'sources', 'posts', 'editorial_decisions', 'persona_memory', 'agent_runs', 'discovery_candidates', 'discovery_fetches', 'source_health', 'embeddings', 'schema_migrations']) {
       assert.ok(tables.includes(t), `missing table ${t}`);
     }
     // Reopen: migrations must not re-run or error.
@@ -398,7 +398,7 @@ describe('memory + runs + cascade delete', () => {
     const runId = insertRun({ agentId, topicId: null, status: 'running', outcome: null, startedAtMs: T0 });
     updateRun(runId, { status: 'completed', finishedAtMs: T0 + 5000, outcome: 'published' });
 
-    assert.equal(getMemoryNodesByAgent(agentId).length, 3); // 2 seeds + 1
+    assert.equal(getMemoryNodesByAgent(agentId).length, 1); // persona_memory is written only by the legacy sim (test-only); no seed nodes
     const runs = getRunsByAgent(agentId);
     assert.equal(runs.length, 1);
     assert.equal(runs[0].status, 'completed');

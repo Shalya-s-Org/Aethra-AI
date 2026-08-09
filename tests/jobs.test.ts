@@ -35,6 +35,13 @@ function newAgent(domain = 'ai-security'): string {
   return initializeAgentInstance('Test Agent', domain, undefined, {}, T0).agentId;
 }
 
+/** The global candidate pool is shared across agents (fetch-once). Cycle tests
+ *  are self-contained: clear fixtures from earlier tests so a fresh agent's
+ *  editorial run starts from a known pending set. */
+function clearPipeline(): void {
+  getDb().exec('DELETE FROM discovery_decisions; DELETE FROM discovery_candidates; DELETE FROM discovery_fetches;');
+}
+
 function countingCycle(counter: { runs: number; byAgent?: Record<string, number> }): CycleRunner {
   return async (agentId: string, now: number) => {
     void now;
@@ -72,6 +79,7 @@ function seedGatePassedDecision(agentId: string): string {
   };
   upsertDiscoveryDecision({
     id: `decision-${agentId.slice(-6)}`,
+    agentId,
     candidateId: candidate.id,
     decision: 'accepted',
     totalScore: 87,
@@ -282,6 +290,7 @@ describe('transactional gated publication', () => {
 
   it('never publishes merely because a run occurred (no gate-passed decisions)', async () => {
     const agentId = newAgent();
+    clearPipeline(); // no pending candidates → no editorial accepts → nothing publishes
     const before = getPostsByAgent(agentId).length;
     const result = await runAgentCycle(agentId, T0, { skipDiscovery: true });
     assert.ok(result.ok);
@@ -291,8 +300,7 @@ describe('transactional gated publication', () => {
 
   it('publishes after a real editorial + gate pass in one scheduled occurrence', async () => {
     const agentId = newAgent();
-    // Distinct title from the seed test above — the duplicate detector would
-    // otherwise reject it for matching an already-accepted headline.
+    clearPipeline(); // only this test's candidate is pending for this agent
     const candidate = makeCandidate({
       title: 'Unauthenticated remote code execution in widely deployed AI gateway component',
       summary: 'An unauthenticated request to the AI gateway control plane executes arbitrary commands, tracked as CVE-2026-88888. Patch released. GHSA-aaaa-bbbb-cccc assigned.',

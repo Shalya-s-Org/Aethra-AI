@@ -72,6 +72,17 @@ const OPENING_SIM_THRESHOLD = 0.75;
 
 const URL_RE = /https?:\/\/[^\s"'<>)\]]+/g;
 
+// A concrete security/architecture recommendation: an actionable imperative
+// (should/must/recommend/… ) aimed at a concrete action (isolate, upgrade,
+// patch, gate, restrict, …). Both halves are required — a generic "operators
+// should be careful" carries no recommendation.
+const RECOMMENDATION_VERB_RE = /(should|must|we recommend|we advise|we urge|adopt|require|consider)/i;
+const RECOMMENDATION_ACTIONS = [
+  'isolate', 'upgrade', 'patch', 'gate', 'restrict', 'enforce', 'audit',
+  'disable', 'validate', 'allowlist', 'least privilege', 'sandbox',
+  'remediate', 'monitor', 'deprecate', 'review', 're-architect', 'verify'
+];
+
 /** https URLs inside the evidence corpus the draft is allowed to cite. */
 export function evidenceUrlsOf(rawEvidence: string, canonicalUrl: string): string[] {
   const urls = [...rawEvidence.matchAll(URL_RE)].map(m =>
@@ -299,27 +310,36 @@ export function runQualityGate(input: QualityGateInput): QualityGateReport {
   });
 
   // 11. Structure: fact → interpretation → why it matters → Ada's view.
-  // Stages are anchored on the persona's section headers (word-boundary, so
-  // remediation words inside the summary like "patch" or "mitigation" never
-  // masquerade as the interpretation stage), with distinctive content
-  // fallbacks for the later stages.
-  const atWord = (phrase: string): number => {
-    const m = text.toLowerCase().search(new RegExp(`\\b${phrase}\\b`));
-    return m; // -1 when absent
+  // Stages are anchored on the persona's section headers as sentence-initial
+  // labels followed by a delimiter (e.g. "Summary.", "Exploitability.",
+  // "Architectural implications."), so stage words inside free-form openings
+  // and transitions ("blast radius", "trust boundary") never masquerade as a
+  // stage; distinctive content fallbacks cover header-less drafts.
+  const atHeader = (phrase: string): number => {
+    const esc = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const capitalized = phrase.charAt(0).toUpperCase() + phrase.slice(1);
+    // The exact Capitalized label anywhere (word boundary + delimiter): a real
+    // section header, whether it follows the title directly or a sentence. The
+    // lowercase prose of the approved openings/transitions ("blast radius",
+    // "trust boundary") never matches this.
+    const cap = new RegExp(`\\b${capitalized}\\s*[:.]`).exec(text);
+    if (cap) return cap.index;
+    // Sentence-initial label in any case (covers a lowercased header).
+    const si = new RegExp(`(?:^|[.!?]\\s+|\\n)\\s*(${esc})\\s*[:.]`, 'i').exec(text);
+    return si ? si.index + si[0].indexOf(si[1]) : -1; // -1 when absent
   };
-  const fact = atWord('summary');
+  const fact = atHeader('summary');
   const interp = (() => {
-    const headers = ['exploitability', 'blast radius', 'mitigations'].map(atWord).filter(i => i !== -1);
+    const headers = ['exploitability', 'blast radius', 'mitigations'].map(atHeader).filter(i => i !== -1);
     return headers.length > 0 ? Math.min(...headers) : text.toLowerCase().search(/exploitab|attack surface|precondition/);
   })();
   const whyMatters = (() => {
-    const i = atWord('architectural implications');
+    const i = atHeader('architectural implications');
     if (i !== -1) return i;
-    const j = text.toLowerCase().search(/trust boundary|isolation|design implication/);
-    return j;
+    return text.toLowerCase().search(/trust boundary|isolation|design implication/);
   })();
   const view = (() => {
-    const i = atWord('confidence');
+    const i = atHeader('confidence');
     if (i !== -1) return i;
     return text.toLowerCase().search(/we assess|not yet verified|uncertain|unconfirmed/);
   })();
@@ -352,6 +372,23 @@ export function runQualityGate(input: QualityGateInput): QualityGateReport {
       : input.followUp
         ? 'Draft ignores the relevant prior story it must build on.'
         : 'Draft references prior content that is not relevant to this candidate.'
+  });
+
+  // 13. Concrete security/architecture recommendation: an actionable
+  //     imperative aimed at a concrete action — not just analysis.
+  const hasRecommendationVerb = RECOMMENDATION_VERB_RE.test(text);
+  const hasRecommendationAction = RECOMMENDATION_ACTIONS.some(a => text.toLowerCase().includes(a));
+  const hasRecommendation = hasRecommendationVerb && hasRecommendationAction;
+  checks.push({
+    id: 'recommendation',
+    label: 'Concrete security/architecture recommendation',
+    passed: hasRecommendation,
+    required: true,
+    detail: hasRecommendation
+      ? 'Draft states a concrete, actionable security or architecture recommendation.'
+      : hasRecommendationVerb
+        ? 'Draft urges action but names no concrete action (isolate, upgrade, patch, gate, restrict, …).'
+        : 'Draft offers analysis but no recommendation (no should/must/recommend with a concrete action).'
   });
 
   const required = checks.filter(c => c.required);

@@ -4,6 +4,8 @@
 // Cron POST /api/cron/run, a system cron, or a CI schedule invoking the
 // one-shot `npm run worker`) calls processDueJobs(); nothing here uses
 // setInterval/setTimeout and no API GET ever triggers work.
+
+import { redactSecrets } from '../security';
 //
 // Safety properties:
 //   - Lease: each occurrence is claimed atomically (the guard lives in the
@@ -192,6 +194,9 @@ export class JobQueue {
     now: number,
     error: string
   ): DueJobSummary['details'][number] {
+    // Persisted failure text is redacted: cycle errors may embed fetched URLs,
+    // LLM API details, or other content that must never reach the DB/logs.
+    error = redactSecrets(error);
     const nextAttempt = row.attempts + 1;
     if (nextAttempt >= (row.maxAttempts || this.maxAttempts)) {
       // Terminal: record the failure, keep the recurring cadence, reset

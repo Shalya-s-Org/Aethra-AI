@@ -238,7 +238,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartInit }) => {
                   <Cpu className="w-4 h-4 text-cyber-emerald" />
                 </div>
                 <div>
-                  <h4 className="font-display text-xs font-semibold text-white uppercase">Autonomous Simulation & API Contract</h4>
+                  <h4 className="font-display text-xs font-semibold text-white uppercase">Autonomous Agent & API Contract</h4>
                   <p className="text-[10px] text-gray-500">Exposes /api/agent/init and /api/agent/feed for judging audits</p>
                 </div>
               </div>
@@ -247,7 +247,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onStartInit }) => {
 
           <GlassCard className="font-mono text-[10px] leading-relaxed p-6 bg-black/60 border-white/15">
             <div className="flex justify-between items-center pb-4 mb-4 border-b border-white/10">
-              <span className="text-gray-400 font-display text-[10px] tracking-wider uppercase font-semibold">API Endpoint Test: GET /api/agent/feed</span>
+              <span className="text-gray-400 font-display text-[10px] tracking-wider uppercase font-semibold">GET /api/agent/feed · response shape (illustrative sample, not live data)</span>
               <div className="w-2.5 h-2.5 rounded-full bg-cyber-cyan" />
             </div>
             <pre className="text-cyber-cyan overflow-x-auto">

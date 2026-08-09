@@ -16,6 +16,7 @@ import {
 } from '../src/lib/persona';
 import { scoreCandidate } from '../src/lib/editorial/scoring';
 import { runEditorial } from '../src/lib/editorial/engine';
+import { initializeAgentInstance } from '../src/lib/agentEngine';
 import { makeCandidate, type SourceType } from '../src/lib/discovery/types';
 import { getRelevantMemory, personaAffinityOf } from '../src/lib/memory/memory';
 import type { MemoryItem } from '../src/lib/memory/dedup';
@@ -30,6 +31,9 @@ after(() => {
 const T0 = 1_750_000_000_000;
 const HOUR = 3600_000;
 const iso = (ms: number): string => new Date(ms).toISOString();
+
+// The editorial pipeline is per-agent; one agent owns this file's state.
+const AGENT_ID = initializeAgentInstance('Persona Test', 'ai-security').agentId;
 
 function candidate(seed: {
   title: string;
@@ -169,7 +173,7 @@ describe('persona-driven candidate rejection', () => {
       rawEvidence: JSON.stringify({ cve_id: 'CVE-2026-99999', ghsa_id: 'GHSA-aaaa-bbbb-cccc', summary: 'prompt injection rce' }) // no severity → threshold path
     });
 
-    const run = await runEditorial({ now: T0 + HOUR, routineIntervalMs: 0, dailyCap: 10_000 });
+    const run = await runEditorial({ agentId: AGENT_ID, now: T0 + HOUR, routineIntervalMs: 0, dailyCap: 10_000 });
 
     const u = decisionOf(run, unrelated.id);
     assert.equal(u.kind, 'rejected');
@@ -189,7 +193,7 @@ describe('persona-driven candidate rejection', () => {
       sourceType: 'github-release',
       rawEvidence: JSON.stringify({ tag_name: 'v1.0.0' })
     });
-    const run = await runEditorial({ now: T0 + 2 * HOUR, routineIntervalMs: 0, dailyCap: 10_000 });
+    const run = await runEditorial({ agentId: AGENT_ID, now: T0 + 2 * HOUR, routineIntervalMs: 0, dailyCap: 10_000 });
     const d = decisionOf(run, m.id);
     assert.equal(d.kind, 'rejected');
     assert.match(d.explanation, /marketing/);

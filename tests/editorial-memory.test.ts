@@ -11,6 +11,7 @@ import { runEditorial } from '../src/lib/editorial/engine';
 import { makeCandidate, type SourceType } from '../src/lib/discovery/types';
 import type { EditorialDecision } from '../src/lib/editorial/types';
 import { getEditorialStance } from '../src/lib/memory/memory';
+import { initializeAgentInstance } from '../src/lib/agentEngine';
 import { closeDb, getRecentMemoryEntries, insertDiscoveryCandidate } from '../src/lib/db';
 
 after(() => {
@@ -24,6 +25,9 @@ const HOUR = 3600_000;
 const nowFor = (i: number): number => T0 + i * DAY;
 const iso = (ms: number): string => new Date(ms).toISOString();
 const NO_LIMITS = { routineIntervalMs: 0, dailyCap: 10_000 };
+
+// The editorial pipeline is per-agent; one agent owns this file's state.
+const AGENT_ID = initializeAgentInstance('Editorial Memory', 'ai-security').agentId;
 
 interface CandidateSeed {
   title: string;
@@ -73,14 +77,14 @@ async function seedStory(runAt: number): Promise<{ id: string }> {
     canonicalUrl: STORY.canonicalUrl,
     publishedAt: iso(runAt - 2 * HOUR)
   });
-  await runEditorial({ now: runAt, ...NO_LIMITS });
+  await runEditorial({ agentId: AGENT_ID, now: runAt, ...NO_LIMITS });
   return s;
 }
 
 describe('durable memory in the editorial pipeline', () => {
   it('accepts the seed story first', async () => {
     const s = await seedStory(nowFor(1));
-    const stance = getEditorialStance(null, STORY.title);
+    const stance = getEditorialStance(AGENT_ID, STORY.title);
     assert.ok(stance, 'accepted story must be recorded as editorial memory');
     assert.equal(stance.relation, 'confirms');
     void s;
@@ -110,7 +114,7 @@ describe('durable memory in the editorial pipeline', () => {
       canonicalUrl: 'https://example.com/reshared-copy',
       publishedAt: iso(nowFor(3) - 2 * HOUR)
     });
-    const run = await runEditorial({ now: nowFor(3), ...NO_LIMITS });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(3), ...NO_LIMITS });
     const d = decisionOf(run, dup.id);
     assert.equal(d.kind, 'rejected');
     assert.match(d.explanation, /Duplicate: title matches accepted candidate/);
@@ -123,7 +127,7 @@ describe('durable memory in the editorial pipeline', () => {
       canonicalUrl: 'https://example.com/slug-copy',
       publishedAt: iso(nowFor(4) - 2 * HOUR)
     });
-    const run = await runEditorial({ now: nowFor(4), ...NO_LIMITS });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(4), ...NO_LIMITS });
     const d = decisionOf(run, near.id);
     assert.equal(d.kind, 'rejected');
     assert.match(d.explanation, /Near-duplicate|Duplicate/);
@@ -139,7 +143,7 @@ describe('durable memory in the editorial pipeline', () => {
       publishedAt: iso(nowFor(5) - 2 * HOUR),
       rawEvidence: JSON.stringify({ cve_id: 'CVE-2026-1001', ghsa_id: 'GHSA-aaaa-bbbb-cccc', summary: 'rehash' }) // no severity → not breaking
     });
-    const run = await runEditorial({ now: nowFor(5), ...NO_LIMITS });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(5), ...NO_LIMITS });
     const d = decisionOf(run, staleFollowUp.id);
     assert.equal(d.kind, 'rejected');
     assert.match(d.explanation, /Follow-up on .* without meaningful new information/);
@@ -165,20 +169,20 @@ describe('durable memory in the editorial pipeline', () => {
         cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H'
       })
     });
-    const run = await runEditorial({ now: nowFor(6), ...NO_LIMITS });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(6), ...NO_LIMITS });
     const d = decisionOf(run, followUp.id);
     assert.equal(d.kind, 'accepted', d.explanation);
     assert.match(d.explanation, /Follow-up on/);
     assert.match(d.explanation, /updates the prior stance/);
 
     // Editorial memory: the story's stance is now 'updates' (new CVE).
-    const stance = getEditorialStance(null, STORY.title);
+    const stance = getEditorialStance(AGENT_ID, STORY.title);
     assert.ok(stance);
     assert.equal(stance.relation, 'updates');
     assert.ok(stance.occurrences >= 2, `story seen ${stance.occurrences} times`);
 
     // Long-term memory accumulated on the same story subject.
-    const longTerm = getRecentMemoryEntries({ agentId: null, kinds: ['long_term'], limit: 50 });
+    const longTerm = getRecentMemoryEntries({ agentId: AGENT_ID, kinds: ['long_term'], limit: 50 });
     const storyEntry = longTerm.find(e => e.subject.includes('agent sandbox vault bypass'));
     assert.ok(storyEntry, 'long-term memory must record the recurring subject');
     assert.ok(storyEntry.occurrences >= 2);
@@ -192,7 +196,7 @@ describe('durable memory in the editorial pipeline', () => {
       canonicalUrl: 'https://github.com/advisories/GHSA-fresh-1',
       publishedAt: iso(nowFor(7) - 2 * HOUR)
     });
-    const run = await runEditorial({ now: nowFor(7), ...NO_LIMITS });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(7), ...NO_LIMITS });
     const d = decisionOf(run, fresh.id);
     assert.equal(d.kind, 'accepted');
     assert.doesNotMatch(d.explanation, /Follow-up on/);

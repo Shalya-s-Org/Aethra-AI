@@ -165,9 +165,14 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // True once the first live engine snapshot has been applied. Lets the
   // dashboard show a skeleton instead of empty defaults while bootstrapping.
   const [hasLoadedSnapshot, setHasLoadedSnapshot] = useState<boolean>(false);
+  // The ownership credential issued with the init response header. DELETE
+  // /api/agent requires it — an agent id alone can never delete an agent — so
+  // the dashboard keeps it in memory for the session and sends it on reset.
+  const [ownershipToken, setOwnershipToken] = useState<string | null>(null);
 
   const initializeAgent = async (newConfig: AgentConfig) => {
     const previousId = agentId;
+    const previousToken = ownershipToken;
     setHasLoadedSnapshot(false);
     try {
       const res = await fetch('/api/agent/init', {
@@ -177,6 +182,8 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       });
       if (!res.ok) throw new Error("Backend initialization failed");
       const data = await res.json();
+      const token = res.headers.get('x-agent-ownership-token');
+      setOwnershipToken(token);
 
       setAgentId(data.agentId);
       setConfig(newConfig);
@@ -186,7 +193,10 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       // Evict any previous session's agent so its scheduler loop stops too.
       if (previousId) {
-        fetch(`/api/agent?agentId=${encodeURIComponent(previousId)}`, { method: 'DELETE' }).catch(() => {});
+        fetch(`/api/agent?agentId=${encodeURIComponent(previousId)}`, {
+          method: 'DELETE',
+          headers: previousToken ? { 'x-agent-ownership-token': previousToken } : {}
+        }).catch(() => {});
       }
     } catch (err) {
       console.error("Could not register agent session on server:", err);
@@ -195,6 +205,7 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const resetAgent = useCallback(() => {
     const currentId = agentId;
+    const currentToken = ownershipToken;
     setHasLoadedSnapshot(false);
     setIsInitialized(false);
     setAgentId("");
@@ -225,9 +236,12 @@ export const AgentProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // Evict the server-side agent so its scheduler loop stops, not just the view.
     if (currentId) {
-      fetch(`/api/agent?agentId=${encodeURIComponent(currentId)}`, { method: 'DELETE' }).catch(() => {});
+      fetch(`/api/agent?agentId=${encodeURIComponent(currentId)}`, {
+        method: 'DELETE',
+        headers: currentToken ? { 'x-agent-ownership-token': currentToken } : {}
+      }).catch(() => {});
     }
-  }, [agentId]);
+  }, [agentId, ownershipToken]);
 
   // Mirror the live backend engine state. The server-side engine owns the whole
   // simulation (scanning -> filtering -> reasoning -> ... -> publishing), so the

@@ -2,7 +2,10 @@
 //
 // Every outbound request gets: a hard timeout (AbortController), bounded
 // retries with exponential backoff + jitter, and never throws — callers get a
-// typed result so one flaky source can fail in isolation.
+// typed result so one flaky source can fail in isolation. Error strings are
+// redacted before they can reach logs or the persisted source_health row.
+
+import { redactSecrets } from '../security';
 
 export interface FetchResult {
   ok: boolean;
@@ -72,7 +75,7 @@ export async function fetchWithRetry(
       }
       lastError = `HTTP ${response.status}`;
     } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
+      lastError = redactSecrets(err instanceof Error ? err.message : String(err));
     } finally {
       clearTimeout(timer);
     }

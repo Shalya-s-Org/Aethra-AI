@@ -8,6 +8,7 @@ const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'aethra-llm-test-'));
 process.env.AETHRA_DB_PATH = path.join(TMP_DIR, 'llm.db');
 
 import { runEditorial } from '../src/lib/editorial/engine';
+import { initializeAgentInstance } from '../src/lib/agentEngine';
 import { makeCandidate, type SourceType } from '../src/lib/discovery/types';
 import { getPersona } from '../src/lib/persona';
 import { buildGenerationPrompt } from '../src/lib/persona/prompt';
@@ -16,11 +17,15 @@ import {
   generatePost,
   repairJsonString,
   validateGeneratedPost,
+  createLlmProvider,
+  LocalDeterministicProvider,
+  OpenAiCompatibleProvider,
   FailingProvider,
   type GenerationContext,
   type LlmProvider,
   type LlmProviderResult
 } from '../src/lib/llm';
+import { openingOf } from '../src/lib/quality';
 import type { GeneratedPost } from '../src/lib/llm/types';
 import { closeDb, getDiscoveryDecisions, insertDiscoveryCandidate } from '../src/lib/db';
 import { gatherMemoryItems } from '../src/lib/memory/memory';
@@ -36,6 +41,9 @@ const DAY = 25 * 3600_000;
 const nowFor = (i: number): number => T0 + i * DAY;
 const iso = (ms: number): string => new Date(ms).toISOString();
 const NO_LIMITS = { routineIntervalMs: 0, dailyCap: 10_000 };
+
+// The editorial pipeline is per-agent; one agent owns this file's state.
+const AGENT_ID = initializeAgentInstance('LLM Test', 'ai-security').agentId;
 
 const persona = getPersona(null);
 
@@ -203,6 +211,63 @@ describe('local deterministic provider', () => {
     assert.equal(a.raw, b.raw);
   });
 
+  it('varies openings and transitions across different candidates (no fixed template)', async () => {
+    const second = {
+      title: 'Deserialization flaw in the checkpoint loader allows remote code execution',
+      summary:
+        'An insecure deserialization path in the checkpoint loader executes arbitrary commands from crafted model files. Affects versions below 3.1; patch released. CVE-2026-77771 assigned.',
+      canonicalUrl: 'https://github.com/advisories/GHSA-llm-test-0002',
+      sourceName: 'GitHub Security Advisories',
+      rawEvidence: JSON.stringify({
+        cve_id: 'CVE-2026-77771',
+        ghsa_id: 'GHSA-llm-test-0002',
+        severity: 'high',
+        summary: 'deserialization command execution in checkpoint loader'
+      })
+    };
+    const a = await generatePost({ persona, candidate: CANDIDATE, themes: [], competing: [] });
+    const b = await generatePost({ persona, candidate: second, themes: [], competing: [] });
+    assert.ok(a.ok && b.ok);
+    if (!(a.ok && b.ok)) return;
+    const openingA = openingOf(a.post.text);
+    const openingB = openingOf(b.post.text);
+    assert.notEqual(openingA, openingB, 'different candidates must open differently');
+    // The structural skeleton (labeled stages) is still required.
+    for (const label of ['Summary.', 'Exploitability.', 'Blast radius.', 'Architectural implications.', 'Confidence.']) {
+      assert.ok(a.post.text.includes(label), `missing stage ${label}`);
+      assert.ok(b.post.text.includes(label), `missing stage ${label}`);
+    }
+    // Both drafts carry the required concrete recommendation.
+    assert.match(a.post.text, /should .*(isolate|gate|review|verify)/i);
+    assert.match(b.post.text, /should .*(isolate|gate|review|verify)/i);
+  });
+
+  it('avoids a recently used opening when selecting the next pattern', async () => {
+    const a = await generatePost({ persona, candidate: CANDIDATE, themes: [], competing: [] });
+    assert.ok(a.ok);
+    if (!a.ok) return;
+    const openingA = openingOf(a.post.text);
+
+    const second = {
+      title: 'Sandbox escape in the code interpreter grants host filesystem access',
+      summary:
+        'A sandbox escape in the hosted code interpreter grants host filesystem access to authenticated tenants. Patch released. CVE-2026-77772 assigned.',
+      canonicalUrl: 'https://github.com/advisories/GHSA-llm-test-0003',
+      sourceName: 'GitHub Security Advisories',
+      rawEvidence: JSON.stringify({
+        cve_id: 'CVE-2026-77772',
+        ghsa_id: 'GHSA-llm-test-0003',
+        severity: 'high',
+        summary: 'sandbox escape host filesystem access code interpreter'
+      })
+    };
+    const b = await generatePost({ persona, candidate: second, themes: [], competing: [], recentOpenings: [openingA] });
+    assert.ok(b.ok);
+    if (!b.ok) return;
+    const openingB = openingOf(b.post.text);
+    assert.notEqual(openingB, openingA, 'must not reuse the recently used opening');
+  });
+
   it('reports a transport failure without retrying', async () => {
     const failing = new FailingProvider('boom');
     const outcome = await generatePost({ persona, candidate: CANDIDATE, themes: [], competing: [], provider: failing });
@@ -262,6 +327,41 @@ describe('corrective retry', () => {
   });
 });
 
+describe('provider factory (production vs offline)', () => {
+  // Next.js types require NODE_ENV on ProcessEnv; tests run as NODE_ENV=test.
+  const env = (vars: Record<string, string>): NodeJS.ProcessEnv => ({ NODE_ENV: 'test', ...vars });
+
+  it('resolves the provider by env: local offline, openai in production/keyed deployments', () => {
+
+    // Offline dev / tests without a key → deterministic local provider.
+    assert.ok(createLlmProvider(env({})) instanceof LocalDeterministicProvider);
+    assert.ok(createLlmProvider(env({ AETHRA_LLM_PROVIDER: 'local' })) instanceof LocalDeterministicProvider);
+
+    // A key present → the real OpenAI-compatible provider, even with provider
+    // unset (deployed production convention).
+    assert.ok(createLlmProvider(env({ AETHRA_LLM_API_KEY: 'sk-test' })) instanceof OpenAiCompatibleProvider);
+    assert.ok(
+      createLlmProvider(env({ NODE_ENV: 'production', AETHRA_LLM_API_KEY: 'sk-test' })) instanceof
+        OpenAiCompatibleProvider
+    );
+    assert.ok(
+      createLlmProvider(env({ AETHRA_LLM_PROVIDER: 'openai', AETHRA_LLM_API_KEY: 'sk-test' })) instanceof
+        OpenAiCompatibleProvider
+    );
+  });
+
+  it('fails loudly in production without a key (never a silent deterministic fallback)', () => {
+    // NODE_ENV=production with no key must NOT fall back to the local
+    // deterministic writer — it fails so nothing weak is ever published.
+    const prod = createLlmProvider({ NODE_ENV: 'production' });
+    assert.ok(prod instanceof FailingProvider);
+
+    // Explicit openai mode without a key is also a failing provider.
+    const openaiNoKey = createLlmProvider(env({ AETHRA_LLM_PROVIDER: 'openai' }));
+    assert.ok(openaiNoKey instanceof FailingProvider);
+  });
+});
+
 describe('prompt construction', () => {
   it('labels evidence as untrusted data and never as instructions', () => {
     const { system, user } = buildGenerationPrompt(persona, {
@@ -299,7 +399,7 @@ describe('editorial engine integration', () => {
       'Critical prompt injection vulnerability in agent framework allows remote code execution',
       'https://github.com/advisories/GHSA-llm-e2e-0001'
     );
-    const run = await runEditorial({ now: nowFor(1), ...NO_LIMITS });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(1), ...NO_LIMITS });
     const decision = run.decisions.find(d => d.candidateId === id);
     assert.ok(decision, 'expected an accepted decision');
     assert.equal(decision!.kind, 'accepted');
@@ -320,7 +420,7 @@ describe('editorial engine integration', () => {
       'https://github.com/advisories/GHSA-llm-e2e-0002'
     );
     const before = gatherMemoryItems(null);
-    const run = await runEditorial({
+    const run = await runEditorial({ agentId: AGENT_ID,
       now: nowFor(2),
       ...NO_LIMITS,
       provider: new GarbageProvider()

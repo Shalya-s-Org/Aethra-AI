@@ -10,6 +10,7 @@ process.env.AETHRA_DB_PATH = path.join(TMP_DIR, 'engine.db');
 import {
   advanceAgentById,
   destroyAgent,
+  getOwnershipToken,
   initializeAgentInstance,
   peekAgentState
 } from '../src/lib/agentEngine';
@@ -174,7 +175,11 @@ describe('durability across restarts', () => {
     assert.equal(countPosts(id), 2);
     assert.equal(getRunsByAgent(id).length, 2);
 
-    destroyAgent(id);
+    const token = getOwnershipToken(id);
+    assert.ok(token, 'every agent gets an ownership credential');
+    assert.equal(destroyAgent(id, 'wrong-token'), false, 'a wrong credential never deletes');
+    assert.ok(getAgentRow(id), 'agent survives the wrong credential');
+    assert.equal(destroyAgent(id, token as string), true);
     assert.equal(getAgentRow(id), null);
     assert.equal(countPosts(id), 0);
   });
