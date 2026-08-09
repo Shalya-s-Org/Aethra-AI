@@ -11,6 +11,7 @@
     "discover": "tsx scripts/discover.ts",
     "worker": "tsx scripts/worker.ts",
     "evaluate": "tsx scripts/evaluate.ts",
+    "release-check": "tsx scripts/release-check.ts",
     "generate-fixtures": "tsx scripts/generate-replay-fixtures.ts",
     "record-fixtures": "tsx scripts/record-discovery-fixtures.ts"
   },

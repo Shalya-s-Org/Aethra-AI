@@ -118,12 +118,17 @@ export function publishPublishablePosts(agentId: string, now: number): number {
 export async function runAgentCycle(agentId: string, now: number, opts: CycleOptions = {}): Promise<CycleResult> {
   // Discovery: live sources with per-source error isolation. A COMPLETE outage
   // (every allowlisted source failed) is a transient job failure — the queue
-  // retries it with bounded exponential backoff.
+  // retries it with bounded exponential backoff. The runner records failed
+  // fetches as rows with status 'failure', so a total outage is "failures
+  // present AND every recorded fetch failed" (an empty fetch list with no
+  // failures just means nothing was attempted).
   if (!opts.skipDiscovery) {
     const summary = opts.discovery
       ? await opts.discovery(now)
       : await runDiscovery({ now });
-    if (summary.failures.length > 0 && summary.fetches.length === 0) {
+    const totalOutage =
+      summary.failures.length > 0 && summary.fetches.every(f => f.status === 'failure');
+    if (totalOutage) {
       return {
         ok: false,
         error: `${TRANSIENT_PREFIX} all discovery sources failed (${summary.failures.length} source(s) down)`

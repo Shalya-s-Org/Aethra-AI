@@ -180,6 +180,36 @@ AETHRA_LIVE_SMOKE=1 npx tsx --test tests/discovery-smoke.test.ts   # opt-in live
 
 Replay also proves the runner never requests an un-allowlisted URL: anything outside the recorded set 404s and surfaces as a source failure.
 
+## Release-readiness check
+
+The final pre-evaluation gate — `npm run release-check` — verifies the whole system the way the judges will: the judged API contract, the accelerated 48-hour simulation through the **real** durable scheduler (DB-backed leases, idempotent occurrences), editorial pipeline, memory, quality gate, restart persistence, scheduler crash recovery, duplicate cron delivery, source failure isolation, and LLM failure handling. It runs fully offline on a scratch database (dev/production data is never touched) and writes a machine-readable JSON report:
+
+```bash
+AETHRA_CRON_SECRET=<your-secret> npm run release-check            # human report → .data/release-report.json
+npm run release-check -- --json                                   # machine-readable report on stdout
+npm run release-check -- --report=/tmp/report.json                # custom report path
+```
+
+The gate **fails (exit code ≠ 0)** when any of these hold:
+- **No external scheduler configured** — the committed systemd timer/webhook (`deploy/aethra-cron.timer` + `deploy/aethra-cron.service`) must exist and `AETHRA_CRON_SECRET` must be set (the timer sends it as a Bearer token; the cron route rejects requests without it).
+- **Persistence is local/ephemeral in production** — production mode requires `AETHRA_STORAGE=postgres` + `DATABASE_URL` (a shared hosted database); SQLite fails the gate.
+- **Any judged API contract assertion fails** — init shape/validation, feed shape/ordering/HTTPS sources, read-only `GET /feed`, one-init-per-key, empty-feed semantics.
+
+### Production-like integration mode
+
+Point the gate at a real hosted deployment to verify the shared database and the live cron webhook end to end:
+
+```bash
+AETHRA_RELEASE_MODE=production \
+AETHRA_CRON_URL=https://aethra.example.com/api/cron/run \
+AETHRA_CRON_SECRET=<same-secret-as-the-deployment> \
+AETHRA_STORAGE=postgres \
+DATABASE_URL=postgres://user:pass@host:5432/aethra \
+npm run release-check
+```
+
+This checks: DB connect + idempotent migrations; required tables and the uniqueness/feed-ordering constraints (`idx_posts_idempotency`, `posts.published_at` index); write + rollback transaction semantics; deployed `POST /api/agent/init` idempotency (one agent row per key); the cron endpoint's auth gate (401 without/with a wrong secret, 200 with it); `GET /feed` side-effect-freeness; and that a duplicate cron delivery never creates duplicate posts. Checks that need a configured target are skipped (never run against a half-configured deployment) when a configuration gate fails.
+
 ## Test suite (evaluation matrix)
 
 | Requirement | Where it's tested |
@@ -208,6 +238,7 @@ Replay also proves the runner never requests an un-allowlisted URL: anything out
 | Scheduler health (last cron run, next due) + cron webhook auth (timing-safe secret compare) | `tests/health.test.ts` |
 | Security: ownership-token deletion, prompt injection, SSRF allowlist, malformed LLM output, malicious feed content, secret redaction | `tests/security.test.ts` |
 | Storage drivers (migrations, transactions, restart survival, lease claims; Postgres-gated) | `tests/storage.test.ts` |
+| Release-readiness gate (local 48h + contract gates, fail conditions, production-mode skips) | `tests/release-check.test.ts` |
 
 ## Known operational limits
 

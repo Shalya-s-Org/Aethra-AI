@@ -327,6 +327,62 @@ describe('transactional gated publication', () => {
   });
 });
 
+describe('discovery outage classification (cycle.ts)', () => {
+  it('a total discovery outage is a transient (retryable) failure; a partial one is not', async () => {
+    const agentId = newAgent();
+    clearPipeline();
+    const failureFetch = {
+      id: 'f1',
+      sourceName: 'Broken Source',
+      sourceType: 'cisa-kev' as const,
+      url: 'https://www.cisa.gov/feeds.json',
+      status: 'failure' as const,
+      itemCount: null,
+      error: 'down',
+      fetchedAt: new Date(T0).toISOString()
+    };
+    const outageSummary = {
+      runId: 'outage',
+      startedAt: new Date(T0).toISOString(),
+      finishedAt: new Date(T0).toISOString(),
+      candidates: [],
+      totalCandidates: 0,
+      newCandidates: 0,
+      filtered: 0,
+      fetches: [failureFetch],
+      failures: [{ sourceName: 'Broken Source', error: 'down' }]
+    };
+
+    // Every recorded fetch failed → the occurrence must be a TRANSIENT job
+    // failure so the durable queue retries with backoff (never "succeeds"
+    // without discovery).
+    const total = await runAgentCycle(agentId, T0, { discovery: async () => outageSummary });
+    assert.equal(total.ok, false);
+    assert.match(total.error ?? '', /^TRANSIENT:/, 'a total outage must be transient/retryable');
+
+    // At least one successful fetch → per-source isolation: the cycle proceeds.
+    const partial = await runAgentCycle(agentId, T0 + 1000, {
+      discovery: async () => ({
+        ...outageSummary,
+        fetches: [
+          failureFetch,
+          {
+            id: 'f2',
+            sourceName: 'Healthy Source',
+            sourceType: 'arxiv',
+            url: 'https://export.arxiv.org/api/query',
+            status: 'success',
+            itemCount: 1,
+            error: null,
+            fetchedAt: new Date(T0).toISOString()
+          }
+        ]
+      })
+    });
+    assert.equal(partial.ok, true, 'a partial source failure must not abort the cycle');
+  });
+});
+
 describe('database failure resilience', () => {
   it('an exception inside the cycle (simulating a DB failure) is transient: the worker survives, backs off, and recovers', async () => {
     const agentId = newAgent();
