@@ -6,6 +6,7 @@ import type {
   BackendAgentInstance,
   DiscoveryDecisionLite,
   EngineMeta,
+  MemoryEntryLite,
   PipelineRun,
   PipelineStage
 } from './agentTypes';
@@ -805,7 +806,13 @@ export function peekAgentState(agentId: string, now: number = Date.now()): Backe
     importance: e.importance,
     occurrences: e.occurrences,
     firstSeenAt: e.firstSeenAt,
-    lastSeenAt: e.lastSeenAt
+    lastSeenAt: e.lastSeenAt,
+    // Editorial-memory continuity, persisted in the entry's metadata: how the
+    // newest evidence relates to the persona's prior stance on this subject,
+    // plus the identifiers and themes the record touches.
+    relation: e.metadata.relation as MemoryEntryLite['relation'],
+    identifiers: Array.isArray(e.metadata.identifiers) ? (e.metadata.identifiers as string[]) : undefined,
+    themes: Array.isArray(e.metadata.themes) ? (e.metadata.themes as string[]) : undefined
   }));
 
   // --- Published posts (durable posts table; demo/seed posts labeled) ---

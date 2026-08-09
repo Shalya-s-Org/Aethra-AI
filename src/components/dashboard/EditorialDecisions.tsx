@@ -50,7 +50,7 @@ export const EditorialDecisions: React.FC = () => {
             Discovery Pipeline · Pre-Publication Quality Gate
           </h3>
           <span className="px-1.5 py-0.5 rounded bg-cyber-emerald/10 text-cyber-emerald border border-cyber-emerald/25 text-[8px] font-mono tracking-wider">
-            LIVE
+            PERSISTED
           </span>
         </div>
 

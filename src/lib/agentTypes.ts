@@ -200,6 +200,13 @@ export interface MemoryEntryLite {
   occurrences: number;
   firstSeenAt: string; // ISO UTC
   lastSeenAt: string; // ISO UTC
+  /** Editorial-memory continuity: how the newest evidence relates to the
+   *  persona's prior stance (persisted in the entry's metadata). */
+  relation?: 'confirms' | 'updates' | 'contradicts';
+  /** Security identifiers (CVE/GHSA/arXiv) the entry is about (metadata). */
+  identifiers?: string[];
+  /** Persona recurring themes the entry touches (metadata). */
+  themes?: string[];
 }
 
 /** One post from the durable posts table (demo posts labeled, never hidden). */

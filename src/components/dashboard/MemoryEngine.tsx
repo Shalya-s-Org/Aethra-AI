@@ -37,6 +37,9 @@ export const MemoryEngine: React.FC = () => {
         occurrences: node.occurrences,
         firstSeenAt: node.firstSeenAt,
         lastSeenAt: node.lastSeenAt,
+        relation: node.relation,
+        identifiers: node.identifiers ?? [],
+        themes: node.themes ?? [],
         x: Math.min(x, 480),
         y: Math.min(y, 320)
       };
@@ -55,6 +58,17 @@ export const MemoryEngine: React.FC = () => {
     short_term: { stroke: "#00f0ff", fill: "rgba(0,240,255,0.15)", label: "SHORT-TERM", cls: "bg-cyber-cyan/15 text-cyber-cyan border-cyber-cyan/30" },
     long_term: { stroke: "#a855f7", fill: "rgba(168,85,247,0.15)", label: "LONG-TERM", cls: "bg-cyber-purple/15 text-cyber-purple border-cyber-purple/30" },
     editorial: { stroke: "#10b981", fill: "rgba(16,185,129,0.15)", label: "EDITORIAL", cls: "bg-cyber-emerald/15 text-cyber-emerald border-cyber-emerald/30" }
+  };
+
+  // Editorial-memory continuity: the persisted relation of the newest evidence
+  // to the persona's prior stance on the story (memory_entries metadata).
+  const relationBadge = (relation: string | undefined) => {
+    switch (relation) {
+      case 'updates': return { label: 'UPDATES PRIOR STANCE', cls: 'bg-cyber-cyan/15 text-cyber-cyan border-cyber-cyan/30' };
+      case 'contradicts': return { label: 'CONTRADICTS PRIOR STANCE', cls: 'bg-cyber-red/15 text-cyber-red border-cyber-red/30' };
+      case 'confirms': return { label: 'CONFIRMS PRIOR STANCE', cls: 'bg-cyber-emerald/15 text-cyber-emerald border-cyber-emerald/30' };
+      default: return null;
+    }
   };
 
   return (
@@ -199,6 +213,11 @@ export const MemoryEngine: React.FC = () => {
                 <span className={cn("px-2 py-0.5 rounded text-[8px] font-display uppercase tracking-widest font-bold border", kindColors[selectedNode.kind]?.cls)}>
                   {kindColors[selectedNode.kind]?.label ?? selectedNode.kind}
                 </span>
+                {selectedNode.relation && (
+                  <span className={cn("px-2 py-0.5 rounded text-[8px] font-display uppercase tracking-widest font-bold border", relationBadge(selectedNode.relation)?.cls)}>
+                    {relationBadge(selectedNode.relation)?.label}
+                  </span>
+                )}
               </div>
 
               <div className="space-y-4 text-[10px] font-mono leading-relaxed">
@@ -213,6 +232,29 @@ export const MemoryEngine: React.FC = () => {
                     {selectedNode.content}
                   </p>
                 </div>
+
+                {(selectedNode.identifiers.length > 0 || selectedNode.themes.length > 0) && (
+                  <div className="space-y-1.5">
+                    {selectedNode.identifiers.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {selectedNode.identifiers.map(id => (
+                          <span key={id} className="px-1.5 py-0.5 rounded bg-black/40 border border-white/10 text-[8px] text-cyber-cyan font-mono">
+                            {id}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {selectedNode.themes.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {selectedNode.themes.map(t => (
+                          <span key={t} className="px-1.5 py-0.5 rounded bg-cyber-purple/10 border border-cyber-purple/20 text-[8px] text-cyber-purple font-mono">
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-3 border-y border-white/5 py-3 text-[9px]">
                   <div className="flex justify-between">
