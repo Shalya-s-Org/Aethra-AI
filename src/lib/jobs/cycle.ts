@@ -48,7 +48,7 @@ function advanceSim(agentId: string, now: number): void {
 /** Publish every gate-passed, generated, not-yet-published decision for the
  *  agent, each in its own transaction (topic row + post + once-only marker). */
 export function publishPublishablePosts(agentId: string, now: number): number {
-  const decisions = getPublishableDecisions(25);
+  const decisions = getPublishableDecisions(agentId, 25);
   let published = 0;
   for (const decision of decisions) {
     let post: { title: string; text: string; rationale: string; confidence: number };
@@ -103,10 +103,12 @@ export function publishPublishablePosts(agentId: string, now: number): number {
         publishedAtMs: now,
         idempotencyKey: `decision:${decision.decisionId}`
       });
-      // Global once-only guard: if another worker/agent published this decision
-      // first, the marker update loses and this transaction rolls back — no
-      // duplicate posts anywhere, even under duplicate job delivery.
-      if (!markDecisionPublished(decision.decisionId, postId)) {
+      // Per-agent once-only guard: markDecisionPublished only succeeds when the
+      // decision belongs to THIS agent and no worker published it first — a
+      // re-delivered occurrence, a concurrent worker, or another agent's cycle
+      // can never publish this decision, and this agent can never publish
+      // another agent's decision.
+      if (!markDecisionPublished(agentId, decision.decisionId, postId)) {
         throw new Error('decision already published');
       }
     });
@@ -134,10 +136,10 @@ export async function runAgentCycle(agentId: string, now: number, opts: CycleOpt
     }
   }
 
-  // Editorial: score → generate → quality-gate the pending batch. Generation
-  // failures flip decisions to rejected; gate failures hold or reject — none
-  // of it publishes anything by itself.
-  await runEditorial({ now });
+  // Editorial: score → generate → quality-gate THIS AGENT's pending batch.
+  // Generation failures flip decisions to rejected; gate failures hold or
+  // reject — none of it publishes anything by itself.
+  await runEditorial({ agentId, now });
 
   // Gated publication: only gate-passed, generated, accepted decisions.
   const published = publishPublishablePosts(agentId, now);

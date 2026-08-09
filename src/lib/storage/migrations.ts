@@ -616,5 +616,81 @@ export const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_discovery_decisions_published
         ON discovery_decisions (published_post_id);
     `
+  },
+  {
+    id: '010_per_agent_discovery_decisions',
+    // Per-agent editorial pipeline. discovery_candidates/fetches stay GLOBAL
+    // (fetch once, canonical-URL dedup across all agents); each agent's cycle
+    // fans out the same normalized candidates into its OWN decisions, keyed by
+    // (agent_id, candidate_id) so one agent can never see or publish another
+    // agent's verdict.
+    //
+    // agent_id is nullable ONLY to carry pre-scoping rows (not attributable to
+    // any agent); scoped queries filter agent_id = ?, so legacy rows are
+    // invisible and the code always writes a real id.
+    sqlite: `
+      ALTER TABLE discovery_decisions RENAME TO discovery_decisions_old;
+
+      CREATE TABLE discovery_decisions (
+        id                  TEXT PRIMARY KEY,
+        agent_id            TEXT REFERENCES agents(id) ON DELETE CASCADE,
+        candidate_id        TEXT NOT NULL REFERENCES discovery_candidates(id) ON DELETE CASCADE,
+        decision            TEXT NOT NULL CHECK (decision IN ('accepted','held','rejected')),
+        total_score         INTEGER NOT NULL,
+        persona_relevance   INTEGER NOT NULL,
+        technical_impact    INTEGER NOT NULL,
+        source_quality      INTEGER NOT NULL,
+        recency             INTEGER NOT NULL,
+        novelty             INTEGER NOT NULL,
+        discussion_value    INTEGER NOT NULL,
+        evidence_confidence INTEGER NOT NULL,
+        explanation         TEXT NOT NULL,
+        decided_at          TEXT NOT NULL,
+        generated_json      TEXT,
+        generation_status   TEXT NOT NULL DEFAULT 'none',
+        generation_failure  TEXT,
+        quality_json        TEXT,
+        quality_status      TEXT NOT NULL DEFAULT 'pending',
+        published_post_id   TEXT,
+        UNIQUE (agent_id, candidate_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_decided
+        ON discovery_decisions (decided_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_decision
+        ON discovery_decisions (decision);
+      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_generation
+        ON discovery_decisions (generation_status);
+      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_quality
+        ON discovery_decisions (quality_status);
+      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_published
+        ON discovery_decisions (published_post_id);
+      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_agent_decision
+        ON discovery_decisions (agent_id, decision);
+
+      -- Carry pre-scoping rows with NULL agent_id (invisible to every agent).
+      INSERT INTO discovery_decisions
+        (id, agent_id, candidate_id, decision, total_score, persona_relevance,
+         technical_impact, source_quality, recency, novelty, discussion_value,
+         evidence_confidence, explanation, decided_at, generated_json,
+         generation_status, generation_failure, quality_json, quality_status,
+         published_post_id)
+      SELECT id, NULL, candidate_id, decision, total_score, persona_relevance,
+             technical_impact, source_quality, recency, novelty, discussion_value,
+             evidence_confidence, explanation, decided_at, generated_json,
+             generation_status, generation_failure, quality_json, quality_status,
+             published_post_id
+      FROM discovery_decisions_old;
+
+      DROP TABLE discovery_decisions_old;
+    `,
+    postgres: `
+      ALTER TABLE discovery_decisions ADD COLUMN IF NOT EXISTS agent_id TEXT
+        REFERENCES agents(id) ON DELETE CASCADE;
+      ALTER TABLE discovery_decisions DROP CONSTRAINT IF EXISTS discovery_decisions_candidate_id_key;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_discovery_decisions_agent_candidate
+        ON discovery_decisions (agent_id, candidate_id);
+      CREATE INDEX IF NOT EXISTS idx_discovery_decisions_agent_decision
+        ON discovery_decisions (agent_id, decision);
+    `
   }
 ];

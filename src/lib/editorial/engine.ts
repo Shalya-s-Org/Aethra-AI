@@ -14,6 +14,7 @@ import { generatePost, createLlmProvider, type LlmProvider } from '../llm';
 import {
   countAcceptedSinceMs,
   getAcceptedDecisionCandidates,
+  getAgentRow,
   getLatestAcceptedAtMs,
   getPendingDecisionCandidates,
   getRecentGeneratedAccepted,
@@ -49,6 +50,10 @@ const DUPLICATE_SIM_THRESHOLD = 0.85;
 const DAY_MS = 24 * 3600_000;
 
 export interface EditorialRunOptions {
+  /** The agent whose editorial pipeline this run is (its candidates are
+   *  scored, generated, gated, and persisted under this id). Required — the
+   *  pipeline is per-agent. */
+  agentId: string;
   /** Injectable for deterministic tests. */
   now?: number;
   /** Max candidates evaluated per run. */
@@ -125,17 +130,19 @@ function buildExplanation(kind: DecisionKind, scored: ScoredCandidate, reasons: 
   return reasons.length > 0 ? `${prefix} ${reasons.join(' ')}` : prefix;
 }
 
-export async function runEditorial(options: EditorialRunOptions = {}): Promise<EditorialRunSummary> {
+export async function runEditorial(options: EditorialRunOptions): Promise<EditorialRunSummary> {
   const now = options.now ?? Date.now();
   const interval = options.routineIntervalMs ?? DEFAULT_ROUTINE_INTERVAL_MS;
   const cap = options.dailyCap ?? DEFAULT_DAILY_CAP;
   const limit = options.limit ?? 50;
   const runId = ulid(now);
   const startedAt = new Date(now).toISOString();
-  // The editorial pipeline is the AI Security persona's pipeline.
-  const persona: Persona = getPersona(null);
+  // The persona is resolved from the AGENT's own configuration, so every agent
+  // scores, prompts, and validates against its own persona definition.
+  const agent = getAgentRow(options.agentId);
+  const persona: Persona = getPersona(agent?.state.config.domain ?? null);
 
-  const pending = getPendingDecisionCandidates(limit);
+  const pending = getPendingDecisionCandidates(options.agentId, limit);
   if (pending.length === 0) {
     return {
       runId,
@@ -149,18 +156,19 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
     };
   }
 
-  // Editorial memory: previously accepted candidates (novelty + duplicate base).
-  const acceptedMemory = getAcceptedDecisionCandidates();
+  // Editorial memory: this agent's previously accepted candidates (novelty +
+  // duplicate base) — another agent's accepts never leak into this ladder.
+  const acceptedMemory = getAcceptedDecisionCandidates(options.agentId);
   const memoryTitles = acceptedMemory.map(a => a.title);
 
-  // Durable memory (persona scope): one ladder run per candidate against the
-  // same gathered memory set, so the batch is deterministic.
-  const memoryItems = gatherMemoryItems(null);
+  // Durable memory (this agent's scope): one ladder run per candidate against
+  // the same gathered memory set, so the batch is deterministic.
+  const memoryItems = gatherMemoryItems(options.agentId, { source: 'decisions' });
   const memoryByCandidate = new Map<string, RelevantMemory>();
   for (const candidate of pending) {
     memoryByCandidate.set(
       candidate.id,
-      getRelevantMemory(null, candidate, { items: memoryItems, persona })
+      getRelevantMemory(options.agentId, candidate, { items: memoryItems, persona })
     );
   }
 
@@ -194,7 +202,7 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
       s.flags.duplicateTitleSimilarity = maxTitleSimilarity(s.candidate.title, [dup]);
     }
     seenTitles.push(s.candidate.title);
-    if (hasPublishedCanonicalUrl(s.candidate.canonicalUrl)) {
+    if (hasPublishedCanonicalUrl(options.agentId, s.candidate.canonicalUrl)) {
       s.flags.duplicateUrl = s.candidate.canonicalUrl;
     }
   }
@@ -297,7 +305,7 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
   // a schema-validated post; the quality gate then decides pass (stays
   // accepted), hold (retry next run), or reject (never publish weak content).
   const provider = options.provider ?? createLlmProvider();
-  const recent = getRecentGeneratedAccepted(20);
+  const recent = getRecentGeneratedAccepted(options.agentId, 20);
   const recentTitles = recent.map(r => r.title);
   const recentOpenings = recent.map(r => {
     try {
@@ -357,9 +365,10 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
   }
 
   // Routine posting interval + daily cap, applied in deterministic priority
-  // order. Breaking-security overrides are exempt.
-  let lastAcceptedAt = getLatestAcceptedAtMs(now - interval);
-  let dailyCount = countAcceptedSinceMs(now - DAY_MS);
+  // order, scoped to THIS agent (one agent's cadence never suppresses
+  // another's). Breaking-security overrides are exempt.
+  let lastAcceptedAt = getLatestAcceptedAtMs(options.agentId, now - interval);
+  let dailyCount = countAcceptedSinceMs(options.agentId, now - DAY_MS);
   for (const entry of entries) {
     if (entry.kind !== 'accepted' || entry.scored.flags.breakingSecurity) continue;
     const withinInterval = lastAcceptedAt !== null && now - lastAcceptedAt < interval;
@@ -399,6 +408,7 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
     };
     upsertDiscoveryDecision({
       id: decision.id,
+      agentId: options.agentId,
       candidateId: decision.candidateId,
       decision: decision.kind,
       totalScore: decision.totalScore,
@@ -413,7 +423,7 @@ export async function runEditorial(options: EditorialRunOptions = {}): Promise<E
     // (persona scope), keyed to the story subject for follow-up accumulation,
     // and tagged with the persona's recurring themes.
     if (entry.kind === 'accepted') {
-      recordMemoryForAccepted(null, entry.scored.candidate, {
+      recordMemoryForAccepted(options.agentId, entry.scored.candidate, {
         nowMs: now,
         followUp: entry.scored.flags.meaningfulFollowUp
           ? {

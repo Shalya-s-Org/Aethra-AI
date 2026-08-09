@@ -8,6 +8,7 @@ const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'aethra-llm-test-'));
 process.env.AETHRA_DB_PATH = path.join(TMP_DIR, 'llm.db');
 
 import { runEditorial } from '../src/lib/editorial/engine';
+import { initializeAgentInstance } from '../src/lib/agentEngine';
 import { makeCandidate, type SourceType } from '../src/lib/discovery/types';
 import { getPersona } from '../src/lib/persona';
 import { buildGenerationPrompt } from '../src/lib/persona/prompt';
@@ -36,6 +37,9 @@ const DAY = 25 * 3600_000;
 const nowFor = (i: number): number => T0 + i * DAY;
 const iso = (ms: number): string => new Date(ms).toISOString();
 const NO_LIMITS = { routineIntervalMs: 0, dailyCap: 10_000 };
+
+// The editorial pipeline is per-agent; one agent owns this file's state.
+const AGENT_ID = initializeAgentInstance('LLM Test', 'ai-security').agentId;
 
 const persona = getPersona(null);
 
@@ -299,7 +303,7 @@ describe('editorial engine integration', () => {
       'Critical prompt injection vulnerability in agent framework allows remote code execution',
       'https://github.com/advisories/GHSA-llm-e2e-0001'
     );
-    const run = await runEditorial({ now: nowFor(1), ...NO_LIMITS });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(1), ...NO_LIMITS });
     const decision = run.decisions.find(d => d.candidateId === id);
     assert.ok(decision, 'expected an accepted decision');
     assert.equal(decision!.kind, 'accepted');
@@ -320,7 +324,7 @@ describe('editorial engine integration', () => {
       'https://github.com/advisories/GHSA-llm-e2e-0002'
     );
     const before = gatherMemoryItems(null);
-    const run = await runEditorial({
+    const run = await runEditorial({ agentId: AGENT_ID,
       now: nowFor(2),
       ...NO_LIMITS,
       provider: new GarbageProvider()

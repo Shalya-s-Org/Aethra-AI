@@ -701,7 +701,8 @@ export function peekAgentState(agentId: string, now: number = Date.now()): Backe
   const state = snapshotAgent(row.state, row.engine, now);
 
   // --- Discovery-pipeline editorial decisions (with score breakdown) ---
-  const decisions = getDiscoveryDecisions({ limit: 20 });
+  // Scoped to this agent: the dashboard never shows another agent's verdicts.
+  const decisions = getDiscoveryDecisions({ agentId, limit: 20 });
   state.discoveryDecisions = decisions.map(r => ({
     id: r.id,
     candidateId: r.candidateId,

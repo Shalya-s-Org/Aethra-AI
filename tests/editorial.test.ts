@@ -35,6 +35,9 @@ const HOUR = 3600_000;
 
 const NO_LIMITS = { routineIntervalMs: 0, dailyCap: 10_000 };
 
+// The editorial pipeline is per-agent; one agent owns this file's state.
+const AGENT_ID = initializeAgentInstance('Editorial Test', 'ai-security').agentId;
+
 interface CandidateSeed {
   title: string;
   summary?: string;
@@ -110,7 +113,7 @@ describe('thresholds', () => {
     const marketing = addCandidate({ ...MARKETING, publishedAt: iso(T0 - 2 * HOUR), canonicalUrl: 'https://example.com/coin-bot' });
     const mid = addCandidate({ ...MID, publishedAt: iso(T0 - 2 * HOUR), canonicalUrl: 'https://github.com/example/repo/releases/tag/v1.0.1' });
 
-    const run = await runEditorial({ now: nowFor(1), ...NO_LIMITS });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(1), ...NO_LIMITS });
     assert.equal(run.evaluated, 3);
 
     const s = decisionOf(run, strong.id);
@@ -136,13 +139,13 @@ describe('thresholds', () => {
 describe('duplicates', () => {
   it('rejects a candidate whose title duplicates an accepted one (memory)', async () => {
     addCandidate({ ...STRONG_BASE, publishedAt: iso(T0 - 2 * HOUR), canonicalUrl: 'https://github.com/advisories/GHSA-mem-1' });
-    await runEditorial({ now: nowFor(1), ...NO_LIMITS });
+    await runEditorial({ agentId: AGENT_ID, now: nowFor(1), ...NO_LIMITS });
 
     const dup = addCandidate({
       ...STRONG_BASE, // identical title
       canonicalUrl: 'https://example.com/reshared-copy'
     });
-    const run = await runEditorial({ now: nowFor(2), ...NO_LIMITS });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(2), ...NO_LIMITS });
     const d = decisionOf(run, dup.id);
     assert.equal(d.kind, 'rejected');
     assert.match(d.explanation, /Duplicate: title matches accepted candidate/);
@@ -166,7 +169,7 @@ describe('duplicates', () => {
       publishedAt: iso(T0 - 1 * HOUR),
       rawEvidence: JSON.stringify({ cve_id: 'CVE-2026-42424', ghsa_id: 'GHSA-bbbb-cccc-dddd', severity: 'medium' })
     });
-    const run = await runEditorial({ now: nowFor(3), ...NO_LIMITS });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(3), ...NO_LIMITS });
     const da = decisionOf(run, a.id);
     const db = decisionOf(run, b.id);
     assert.equal(da.kind, 'accepted');
@@ -174,11 +177,12 @@ describe('duplicates', () => {
     assert.match(db.explanation, /Duplicate/);
   });
 
-  it('rejects a candidate whose canonical URL an agent already published', async () => {
-    // Seed an agent + a real published post whose topic carries this URL.
-    const agent = initializeAgentInstance('URL Test', 'Robotics', undefined, undefined, T0);
+  it('rejects a candidate whose canonical URL the agent already published', async () => {
+    // Seed a real published post whose topic carries this URL, owned by the
+    // SAME agent whose editorial run follows (dedup is per-agent: another
+    // agent's publication must NOT block this one).
     const topicId = upsertTopicRow({
-      agentId: agent.agentId,
+      agentId: AGENT_ID,
       title: 'Already published topic',
       canonicalSourceUrl: 'https://nvd.nist.gov/vuln/detail/CVE-2026-77777',
       category: null,
@@ -198,7 +202,7 @@ describe('duplicates', () => {
     });
     insertPost({
       id: '01ARZ3NDEKTSV4RRFFQ69G5FA1',
-      agentId: agent.agentId,
+      agentId: AGENT_ID,
       topicId,
       title: 'Already published topic',
       body: 'body',
@@ -219,7 +223,7 @@ describe('duplicates', () => {
       sourceType: 'cisa-kev',
       rawEvidence: JSON.stringify({ cveID: 'CVE-2026-77777' })
     });
-    const run = await runEditorial({ now: nowFor(4), ...NO_LIMITS });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(4), ...NO_LIMITS });
     const d = decisionOf(run, candidate.id);
     assert.equal(d.kind, 'rejected');
     assert.match(d.explanation, /Duplicate: canonical URL already published/);
@@ -243,7 +247,7 @@ describe('recency', () => {
       publishedAt: iso(nowFor(5) - 2 * HOUR)
     });
 
-    const run = await runEditorial({ now: nowFor(5), ...NO_LIMITS });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(5), ...NO_LIMITS });
     const s = decisionOf(run, stale.id);
     assert.equal(s.kind, 'rejected');
     assert.match(s.explanation, /Stale: published \d+ days ago \(> 30 days\)/);
@@ -275,7 +279,7 @@ describe('tie-breaks', () => {
       publishedAt: iso(nowFor(6) - 1 * HOUR)
     });
 
-    const opts = { now: nowFor(6), routineIntervalMs: HOUR, dailyCap: 10_000 };
+    const opts = { agentId: AGENT_ID, now: nowFor(6), routineIntervalMs: HOUR, dailyCap: 10_000 };
     const run = await runEditorial(opts);
     const d1 = decisionOf(run, older.id);
     const d2 = decisionOf(run, newer.id);
@@ -315,7 +319,7 @@ describe('routine interval and daily cap', () => {
       publishedAt: iso(nowFor(7) - 3 * HOUR)
     });
 
-    const run = await runEditorial({ now: nowFor(7), routineIntervalMs: 2 * HOUR, dailyCap: 10_000 });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(7), routineIntervalMs: 2 * HOUR, dailyCap: 10_000 });
     assert.equal(decisionOf(run, first.id).kind, 'accepted');
     const d2 = decisionOf(run, second.id);
     assert.equal(d2.kind, 'held');
@@ -337,7 +341,7 @@ describe('routine interval and daily cap', () => {
       })
     );
 
-    const run = await runEditorial({ now: nowFor(8), routineIntervalMs: 0, dailyCap: 2 });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(8), routineIntervalMs: 0, dailyCap: 2 });
     assert.equal(decisionOf(run, seeds[0].id).kind, 'accepted');
     assert.equal(decisionOf(run, seeds[1].id).kind, 'accepted');
     const dc = decisionOf(run, seeds[2].id);
@@ -366,7 +370,7 @@ describe('breaking-security override', () => {
       publishedAt: iso(nowFor(9) - 6 * HOUR)
     });
 
-    const run = await runEditorial({ now: nowFor(9), routineIntervalMs: 6 * HOUR, dailyCap: 10_000 });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(9), routineIntervalMs: 6 * HOUR, dailyCap: 10_000 });
     assert.equal(decisionOf(run, routine.id).kind, 'accepted');
 
     const d = decisionOf(run, kev.id);
@@ -383,7 +387,7 @@ describe('breaking-security override', () => {
       publishedAt: iso(nowFor(10) - 40 * 24 * HOUR),
       canonicalUrl: 'https://nvd.nist.gov/vuln/detail/CVE-2026-41414'
     });
-    const run = await runEditorial({ now: nowFor(10), ...NO_LIMITS });
+    const run = await runEditorial({ agentId: AGENT_ID, now: nowFor(10), ...NO_LIMITS });
     const d = decisionOf(run, staleKev.id);
     assert.equal(d.kind, 'rejected');
     assert.match(d.explanation, /Stale/);
@@ -399,7 +403,7 @@ describe('persistence and determinism', () => {
       rawEvidence: MID.rawEvidence,
       canonicalUrl: 'https://github.com/example/repo/releases/tag/v1.0.2'
     });
-    await runEditorial({ now: nowFor(11), ...NO_LIMITS });
+    await runEditorial({ agentId: AGENT_ID, now: nowFor(11), ...NO_LIMITS });
 
     const rows = getDiscoveryDecisions({ limit: 100 });
     const row = rows.find(r => r.candidateId === c.id);

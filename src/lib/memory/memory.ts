@@ -65,14 +65,20 @@ export interface RelevantMemory {
   personaAffinity: number;
 }
 
-/** Gather the durable memory set for a scope (posts/decisions + memory entries). */
+/** Gather the durable memory set for a scope (decisions/posts + memory
+ *  entries). `source` selects the content base: 'decisions' (accepted
+ *  editorial decisions — what the pipeline said) or 'posts' (published posts).
+ *  Default: decisions for the persona scope, posts for a real agent. The
+ *  decision base is scoped to the agent, so one agent's accepted content never
+ *  leaks into another agent's memory ladder. */
 export function gatherMemoryItems(
   agentId: string | null,
-  opts: { memoryLimit?: number } = {}
+  opts: { memoryLimit?: number; source?: 'decisions' | 'posts' } = {}
 ): MemoryItem[] {
   const items: MemoryItem[] = [];
-  if (agentId === null) {
-    for (const accepted of getAcceptedDecisionCandidates()) {
+  const source = opts.source ?? (agentId === null ? 'decisions' : 'posts');
+  if (source === 'decisions') {
+    for (const accepted of getAcceptedDecisionCandidates(agentId)) {
       items.push({
         id: accepted.id,
         title: accepted.title,
@@ -82,7 +88,7 @@ export function gatherMemoryItems(
       });
     }
   } else {
-    for (const post of getRecentPostsForMemory(agentId, 100)) {
+    for (const post of getRecentPostsForMemory(agentId as string, 100)) {
       items.push({
         id: post.id,
         title: post.title,

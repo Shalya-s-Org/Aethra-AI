@@ -854,6 +854,8 @@ export type EditorialDecisionKind = 'accepted' | 'held' | 'rejected';
 
 export interface DiscoveryDecisionRow {
   id: string;
+  /** Owning agent (null only for pre-scoping rows; scoped queries never see them). */
+  agentId: string | null;
   candidateId: string;
   /** Candidate headline (joined from discovery_candidates). */
   title: string;
@@ -882,6 +884,8 @@ export interface DiscoveryDecisionRow {
 
 export interface DiscoveryDecisionInput {
   id: string;
+  /** The agent whose editorial pipeline produced this decision. */
+  agentId: string;
   candidateId: string;
   decision: EditorialDecisionKind;
   totalScore: number;
@@ -909,17 +913,18 @@ export interface DiscoveryDecisionInput {
   };
 }
 
-/** Upsert one decision per candidate (re-evaluation updates in place). */
+/** Upsert one decision per (agent, candidate) — re-evaluation updates in
+ *  place for the same agent only. */
 export function upsertDiscoveryDecision(input: DiscoveryDecisionInput): void {
   getDb()
     .prepare(
       `INSERT INTO discovery_decisions
-         (id, candidate_id, decision, total_score, persona_relevance, technical_impact,
+         (id, agent_id, candidate_id, decision, total_score, persona_relevance, technical_impact,
           source_quality, recency, novelty, discussion_value, evidence_confidence,
           explanation, decided_at, generated_json, generation_status, generation_failure,
           quality_json, quality_status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(candidate_id) DO UPDATE SET
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(agent_id, candidate_id) DO UPDATE SET
          decision = excluded.decision,
          total_score = excluded.total_score,
          persona_relevance = excluded.persona_relevance,
@@ -939,6 +944,7 @@ export function upsertDiscoveryDecision(input: DiscoveryDecisionInput): void {
     )
     .run(
       input.id,
+      input.agentId,
       input.candidateId,
       input.decision,
       input.totalScore,
@@ -973,90 +979,134 @@ function mapDiscoveryCandidateRow(row: Record<string, unknown>): DiscoveryCandid
   };
 }
 
-/** Candidates with no decision yet, or a held decision (retried each run). */
-export function getPendingDecisionCandidates(limit: number): DiscoveryCandidateRow[] {
+/** Candidates with no decision yet FOR THIS AGENT, or a held decision of this
+ *  agent (retried each run). The global candidate pool is fanned out per
+ *  agent: another agent's verdict never hides a candidate from this one. */
+export function getPendingDecisionCandidates(agentId: string, limit: number): DiscoveryCandidateRow[] {
   return getDb()
     .prepare(
       `SELECT dc.id, dc.canonical_url, dc.title, dc.summary, dc.published_at, dc.source_name,
               dc.source_type, dc.raw_evidence, dc.fetched_at
        FROM discovery_candidates dc
-       LEFT JOIN discovery_decisions dd ON dd.candidate_id = dc.id
+       LEFT JOIN discovery_decisions dd ON dd.candidate_id = dc.id AND dd.agent_id = ?
        WHERE dd.id IS NULL OR dd.decision = 'held'
        ORDER BY dc.published_at DESC
        LIMIT ?`
     )
-    .all(limit)
+    .all(agentId, limit)
     .map(r => mapDiscoveryCandidateRow(r as Record<string, unknown>));
 }
 
 /** Accepted candidates as short-term editorial memory (id, title, summary,
  *  canonical URL), newest first, bounded — the duplicate ladder's memory set
- *  for the persona scope. */
-export function getAcceptedDecisionCandidates(): Array<{
+ *  for one agent. Pass null for the legacy persona-global scope. */
+export function getAcceptedDecisionCandidates(agentId: string | null): Array<{
   id: string;
   title: string;
   summary: string;
   canonicalUrl: string;
 }> {
-  return getDb()
-    .prepare(
-      `SELECT dc.id, dc.title, dc.summary, dc.canonical_url
-       FROM discovery_candidates dc
-       JOIN discovery_decisions dd ON dd.candidate_id = dc.id
-       WHERE dd.decision = 'accepted'
-       ORDER BY dd.decided_at DESC
-       LIMIT 500`
-    )
-    .all()
-    .map(r => ({
-      id: String(r.id),
-      title: String(r.title),
-      summary: r.summary == null ? '' : String(r.summary),
-      canonicalUrl: String(r.canonical_url)
-    }));
+  const rows = agentId === null
+    ? getDb()
+        .prepare(
+          `SELECT dc.id, dc.title, dc.summary, dc.canonical_url
+           FROM discovery_candidates dc
+           JOIN discovery_decisions dd ON dd.candidate_id = dc.id
+           WHERE dd.decision = 'accepted'
+           ORDER BY dd.decided_at DESC
+           LIMIT 500`
+        )
+        .all()
+    : getDb()
+        .prepare(
+          `SELECT dc.id, dc.title, dc.summary, dc.canonical_url
+           FROM discovery_candidates dc
+           JOIN discovery_decisions dd ON dd.candidate_id = dc.id
+           WHERE dd.agent_id = ? AND dd.decision = 'accepted'
+           ORDER BY dd.decided_at DESC
+           LIMIT 500`
+        )
+        .all(agentId);
+  return rows.map(r => ({
+    id: String(r.id),
+    title: String(r.title),
+    summary: r.summary == null ? '' : String(r.summary),
+    canonicalUrl: String(r.canonical_url)
+  }));
 }
 
-/** Latest decided_at (ms) of an accepted decision within [sinceMs, now]; null if none. */
-export function getLatestAcceptedAtMs(sinceMs: number): number | null {
-  const row = getDb()
-    .prepare(
-      `SELECT MAX(decided_at) AS m FROM discovery_decisions
-       WHERE decision = 'accepted' AND decided_at >= ?`
-    )
-    .get(iso(sinceMs));
+/** Latest decided_at (ms) of THIS AGENT's accepted decision within [sinceMs,
+ *  now]; null if none. agentId null = legacy persona-global scope. */
+export function getLatestAcceptedAtMs(agentId: string | null, sinceMs: number): number | null {
+  const row = agentId === null
+    ? getDb()
+        .prepare(
+          `SELECT MAX(decided_at) AS m FROM discovery_decisions
+           WHERE decision = 'accepted' AND decided_at >= ?`
+        )
+        .get(iso(sinceMs))
+    : getDb()
+        .prepare(
+          `SELECT MAX(decided_at) AS m FROM discovery_decisions
+           WHERE agent_id = ? AND decision = 'accepted' AND decided_at >= ?`
+        )
+        .get(agentId, iso(sinceMs));
   if (!row || row.m == null) return null;
   const parsed = Date.parse(String(row.m));
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-/** Count of accepted decisions decided at or after sinceMs. */
-export function countAcceptedSinceMs(sinceMs: number): number {
-  const row = getDb()
-    .prepare(
-      `SELECT COUNT(*) AS n FROM discovery_decisions
-       WHERE decision = 'accepted' AND decided_at >= ?`
-    )
-    .get(iso(sinceMs));
+/** Count of THIS AGENT's accepted decisions decided at or after sinceMs.
+ *  agentId null = legacy persona-global scope. */
+export function countAcceptedSinceMs(agentId: string | null, sinceMs: number): number {
+  const row = agentId === null
+    ? getDb()
+        .prepare(
+          `SELECT COUNT(*) AS n FROM discovery_decisions
+           WHERE decision = 'accepted' AND decided_at >= ?`
+        )
+        .get(iso(sinceMs))
+    : getDb()
+        .prepare(
+          `SELECT COUNT(*) AS n FROM discovery_decisions
+           WHERE agent_id = ? AND decision = 'accepted' AND decided_at >= ?`
+        )
+        .get(agentId, iso(sinceMs));
   return Number((row as { n: number }).n);
 }
 
-/** True if any agent already published a real post for this canonical URL. */
-export function hasPublishedCanonicalUrl(url: string): boolean {
-  const row = getDb()
-    .prepare(
-      `SELECT 1 FROM posts p
-       JOIN topics t ON t.id = p.topic_id
-       WHERE p.is_demo = 0 AND t.canonical_source_url = ?
-       LIMIT 1`
-    )
-    .get(url);
+/** True if THIS AGENT already published a real post for this canonical URL
+ *  (deduplication is per-agent: one agent's publication never blocks another's
+ *  feed). agentId null = legacy persona-global scope. */
+export function hasPublishedCanonicalUrl(agentId: string | null, url: string): boolean {
+  const row = agentId === null
+    ? getDb()
+        .prepare(
+          `SELECT 1 FROM posts p
+           JOIN topics t ON t.id = p.topic_id
+           WHERE p.is_demo = 0 AND t.canonical_source_url = ?
+           LIMIT 1`
+        )
+        .get(url)
+    : getDb()
+        .prepare(
+          `SELECT 1 FROM posts p
+           JOIN topics t ON t.id = p.topic_id
+           WHERE p.agent_id = ? AND p.is_demo = 0 AND t.canonical_source_url = ?
+           LIMIT 1`
+        )
+        .get(agentId, url);
   return row != null;
 }
 
-export function getDiscoveryDecisions(options: { limit?: number; decision?: EditorialDecisionKind } = {}): DiscoveryDecisionRow[] {
+export function getDiscoveryDecisions(options: {
+  agentId?: string;
+  limit?: number;
+  decision?: EditorialDecisionKind;
+} = {}): DiscoveryDecisionRow[] {
   const limit = Math.min(500, options.limit ?? 100);
   let sql =
-    `SELECT dd.id, dd.candidate_id, dc.title, dc.canonical_url, dc.source_name, dc.source_type,
+    `SELECT dd.id, dd.agent_id, dd.candidate_id, dc.title, dc.canonical_url, dc.source_name, dc.source_type,
             dd.decision, dd.total_score, dd.persona_relevance,
             dd.technical_impact, dd.source_quality, dd.recency, dd.novelty, dd.discussion_value,
             dd.evidence_confidence, dd.explanation, dd.decided_at, dd.generated_json,
@@ -1065,10 +1115,16 @@ export function getDiscoveryDecisions(options: { limit?: number; decision?: Edit
      FROM discovery_decisions dd
      JOIN discovery_candidates dc ON dc.id = dd.candidate_id`;
   const args: Array<string | number> = [];
+  const where: string[] = [];
+  if (options.agentId !== undefined) {
+    where.push('dd.agent_id = ?');
+    args.push(options.agentId);
+  }
   if (options.decision) {
-    sql += ' WHERE dd.decision = ?';
+    where.push('dd.decision = ?');
     args.push(options.decision);
   }
+  if (where.length > 0) sql += ` WHERE ${where.join(' AND ')}`;
   sql += ' ORDER BY dd.decided_at DESC LIMIT ?';
   args.push(limit);
   return getDb()
@@ -1076,6 +1132,7 @@ export function getDiscoveryDecisions(options: { limit?: number; decision?: Edit
     .all(...args)
     .map(r => ({
       id: String(r.id),
+      agentId: r.agent_id == null ? null : String(r.agent_id),
       candidateId: String(r.candidate_id),
       title: String(r.title),
       candidateUrl: r.canonical_url == null ? null : String(r.canonical_url),
@@ -1101,29 +1158,42 @@ export function getDiscoveryDecisions(options: { limit?: number; decision?: Edit
     }));
 }
 
-/** Recently accepted decisions that carry generated output (draft openings
- *  and titles feed the quality gate's framing/variation checks). */
-export function getRecentGeneratedAccepted(limit = 20): Array<{
+/** Recently accepted decisions of one agent that carry generated output (draft
+ *  openings and titles feed the quality gate's framing/variation checks).
+ *  agentId null = legacy persona-global scope. */
+export function getRecentGeneratedAccepted(agentId: string | null, limit = 20): Array<{
   title: string;
   generatedJson: string;
   decidedAt: string;
 }> {
-  return getDb()
-    .prepare(
-      `SELECT dc.title, dd.generated_json, dd.decided_at
-       FROM discovery_decisions dd
-       JOIN discovery_candidates dc ON dc.id = dd.candidate_id
-       WHERE dd.decision = 'accepted' AND dd.generation_status = 'generated'
-         AND dd.generated_json IS NOT NULL
-       ORDER BY dd.decided_at DESC
-       LIMIT ?`
-    )
-    .all(limit)
-    .map(r => ({
-      title: String(r.title),
-      generatedJson: String(r.generated_json),
-      decidedAt: String(r.decided_at)
-    }));
+  const rows = agentId === null
+    ? getDb()
+        .prepare(
+          `SELECT dc.title, dd.generated_json, dd.decided_at
+           FROM discovery_decisions dd
+           JOIN discovery_candidates dc ON dc.id = dd.candidate_id
+           WHERE dd.decision = 'accepted' AND dd.generation_status = 'generated'
+             AND dd.generated_json IS NOT NULL
+           ORDER BY dd.decided_at DESC
+           LIMIT ?`
+        )
+        .all(limit)
+    : getDb()
+        .prepare(
+          `SELECT dc.title, dd.generated_json, dd.decided_at
+           FROM discovery_decisions dd
+           JOIN discovery_candidates dc ON dc.id = dd.candidate_id
+           WHERE dd.agent_id = ? AND dd.decision = 'accepted'
+             AND dd.generation_status = 'generated' AND dd.generated_json IS NOT NULL
+           ORDER BY dd.decided_at DESC
+           LIMIT ?`
+        )
+        .all(agentId, limit);
+  return rows.map(r => ({
+    title: String(r.title),
+    generatedJson: String(r.generated_json),
+    decidedAt: String(r.decided_at)
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1555,27 +1625,24 @@ export interface PublishableDecisionRow {
   totalScore: number;
 }
 
-/** Gate-passed, generated, accepted decisions that have not been published
- *  yet — the ONLY candidates for publication. */
-export function getPublishableDecisions(limit = 25): PublishableDecisionRow[] {
-  // The discovery/editorial pipeline is persona-global (one Ada persona):
-  // candidates and decisions carry no agent_id. Publication is per-agent but
-  // the global once-only guard (published_post_id) means a decision publishes
-  // at most once across all agents — the first agent's cycle to claim it wins.
+/** Gate-passed, generated, accepted decisions OF ONE AGENT that have not been
+ *  published yet — the ONLY candidates for that agent's publication. */
+export function getPublishableDecisions(agentId: string, limit = 25): PublishableDecisionRow[] {
   return getDb()
     .prepare(
       `SELECT dd.id AS decision_id, dd.candidate_id, dc.title, dc.canonical_url,
               dc.source_name, dc.source_type, dd.generated_json, dd.quality_json, dd.total_score
        FROM discovery_decisions dd
        JOIN discovery_candidates dc ON dc.id = dd.candidate_id
-       WHERE dd.decision = 'accepted'
+       WHERE dd.agent_id = ?
+         AND dd.decision = 'accepted'
          AND dd.generation_status = 'generated'
          AND dd.quality_status = 'passed'
          AND dd.published_post_id IS NULL
        ORDER BY dd.decided_at ASC
        LIMIT ?`
     )
-    .all(limit)
+    .all(agentId, limit)
     .map(r => ({
       decisionId: String(r.decision_id),
       candidateId: String(r.candidate_id),
@@ -1589,14 +1656,17 @@ export function getPublishableDecisions(limit = 25): PublishableDecisionRow[] {
     }));
 }
 
-/** Mark a decision as published (global once-only guard). Returns false if
- *  another worker already published it — callers roll back their transaction. */
-export function markDecisionPublished(decisionId: string, postId: string): boolean {
+/** Mark THIS AGENT's decision as published (per-agent once-only guard).
+ *  Returns false — and the caller must roll back — if the decision belongs to
+ *  another agent or another worker already published it. This is the hard
+ *  guarantee that one agent can never publish another agent's decision. */
+export function markDecisionPublished(agentId: string, decisionId: string, postId: string): boolean {
   const res = getDb()
     .prepare(
-      `UPDATE discovery_decisions SET published_post_id = ? WHERE id = ? AND published_post_id IS NULL`
+      `UPDATE discovery_decisions SET published_post_id = ?
+       WHERE id = ? AND agent_id = ? AND published_post_id IS NULL`
     )
-    .run(postId, decisionId);
+    .run(postId, decisionId, agentId);
   return res.changes === 1;
 }
 
