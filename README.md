@@ -25,8 +25,8 @@ Everything the UI shows comes from real persisted data. The judged API contract 
                                                            │ lease (atomic
         ┌──────────────────────────────────────────────────┴──────────────┐
         │  External scheduler (never setInterval, never a GET):           │
-        │  • Vercel Cron → POST /api/cron/run (x-vercel-cron / Bearer)    │
-        │  • system cron / CI schedule → npm run worker (one-shot)        │
+        │  • systemd timer (deploy/) → POST /api/cron/run (Bearer)        │
+        │  • cron line / CI schedule → npm run worker (one-shot)          │
         └──────────────────────────────────────────────────┬──────────────┘
                                                            │ per due job
         ┌──────────────────────────────────────────────────▼──────────────┐
@@ -70,8 +70,7 @@ Copy `.env.example` to `.env` and fill in local values. Secrets live only in env
 | Variable | Purpose | Default |
 |---|---|---|
 | `AETHRA_DB_PATH` | SQLite database file (durable persistence) | `.data/aethra.db` |
-| `AETHRA_SCHEDULER` | `lazy` (serverless-safe) or `interval` (local dev fallback) | `interval` dev / `lazy` prod |
-| `AETHRA_CRON_SECRET` | Bearer secret for `POST /api/cron/run`; when unset, `x-vercel-cron: 1` is required (local dev) | unset |
+| `AETHRA_CRON_SECRET` | Bearer secret for `POST /api/cron/run` — **required in production**; when unset, `x-vercel-cron: 1` is required (local dev) | unset |
 | `AETHRA_LLM_PROVIDER` | `local` (deterministic, offline — the test provider) or `openai` | `local` |
 | `AETHRA_LLM_API_KEY` | Required when provider ≠ `local` | — |
 | `AETHRA_LLM_BASE_URL` / `AETHRA_LLM_MODEL` / `AETHRA_LLM_TIMEOUT_MS` | OpenAI-compatible endpoint overrides | OpenAI defaults |
@@ -90,41 +89,59 @@ cp .env.example .env            # optional; defaults work out of the box
 npm run dev                     # http://localhost:3000
 ```
 
-The default LLM provider is `local` — fully deterministic and offline — so the whole pipeline runs with no API key. In local development the `interval` scheduler mode advances due agents, which is fine for the dashboard; **production uses only the external scheduler below**.
+The default LLM provider is `local` — fully deterministic and offline — so the whole pipeline runs with no API key. Local development uses only the external scheduler, exactly like production; to advance due agents manually:
 
-## Deployment scheduler configuration
+```bash
+npm run worker                                    # one-shot tick (no HTTP)
+# or, through the same webhook production uses:
+curl -X POST -H "x-vercel-cron: 1" http://localhost:3000/api/cron/run
+```
 
-Recurring work is durable and driven **only** by an external cron/queue — no `setInterval`, no browser tab, no API GET. Two equivalent triggers are provided:
+## Deployment
 
-1. **Vercel Cron** — add a cron entry to `vercel.json`:
+Recurring work is durable and driven **only** by an external scheduler — no `setInterval`, no browser tab, no API GET. `POST /api/agent/init` writes the agent's recurring job row (`scheduled_jobs`); an external scheduler then invokes `POST /api/cron/run` (or the equivalent one-shot `npm run worker`) at the cadence, and each tick leases and runs every due occurrence.
 
-   ```json
-   { "crons": [ { "path": "/api/cron/run", "schedule": "*/30 * * * *" } ] }
+**Deployment target.** The app's durable SQLite database requires a persistent, writable filesystem, so it deploys to a single always-on Linux host (VM/VPS/container) — Vercel serverless functions cannot host it (read-only filesystem, ephemeral `/tmp`; see Known operational limits). A committed, deployment-ready systemd configuration ships in [`deploy/`](deploy/): `aethra-web.service` serves the app, and the `aethra-cron.timer` fires `aethra-cron.service` every 15 minutes, which invokes `POST /api/cron/run` **securely** — the secret from the environment file is sent as `Authorization: Bearer <secret>`, and the route rejects requests without it.
+
+### Deploy steps (Linux host)
+
+1. Copy the app to `/opt/aethra` and install:
+
+   ```bash
+   cd /opt/aethra && npm ci && npm run build
    ```
 
-   Vercel sends `x-vercel-cron: 1`. For extra safety set `AETHRA_CRON_SECRET` and the route also accepts `Authorization: Bearer <secret>`.
+2. Create `/etc/aethra/aethra.env` (chmod 600) with the real secrets:
 
-2. **System cron / CI** — run the one-shot worker CLI:
-
-   ```cron
-   */30 * * * * cd /srv/aethra && npm run worker
+   ```bash
+   AETHRA_DB_PATH=/opt/aethra/.data/aethra.db
+   AETHRA_CRON_SECRET=$(openssl rand -hex 32)   # REQUIRED in production
+   AETHRA_LLM_API_KEY=sk-...                    # only if AETHRA_LLM_PROVIDER != local
    ```
 
-   ```yaml
-   # .github/workflows/worker.yml (GitHub Actions schedule)
-   on:
-     schedule: [{ cron: '*/30 * * * *' }]
-   jobs:
-     worker:
-       runs-on: ubuntu-latest
-       steps:
-         - uses: actions/checkout@v4
-         - run: npm ci
-         - run: npm run worker
-           env: { AETHRA_DB_PATH: ... , AETHRA_LLM_API_KEY: ${{ secrets.LLM_API_KEY }} }
+3. Install and start the units:
+
+   ```bash
+   sudo cp deploy/aethra-web.service deploy/aethra-cron.service deploy/aethra-cron.timer /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now aethra-web.service aethra-cron.timer
    ```
 
-Both invoke `processDueJobs()`, which leases and runs every due occurrence. `POST /api/agent/init` schedules the agent's recurring job row (`scheduled_jobs`) with the configured cadence.
+   The timer fires every 15 minutes; the DB-backed lease makes late or duplicate deliveries harmless, and `Persistent=true` catches ticks missed while the host was down.
+
+4. Verify autonomy:
+
+   ```bash
+   curl -X POST http://localhost:3000/api/agent/init \
+     -H 'content-type: application/json' \
+     -d '{"persona":{"name":"Ada","domain":"ai-security"}}'   # schedules the durable job
+   curl http://localhost:3000/api/health
+   # → { "status":"ok", "jobs":{"active":1,...}, "lastCronRunAt": ..., "nextDueAt": ... }
+   ```
+
+   `GET /api/health` is the health/status mechanism: `lastCronRunAt` is the last successful cron tick and `nextDueAt` is the next due job. `sudo systemctl status aethra-cron.service` shows the last tick's result and `journalctl -u aethra-cron.service` its output.
+
+**Alternative triggers** (equivalent, in case systemd is unavailable): a cron line `*/15 * * * * cd /opt/aethra && AETHRA_CRON_SECRET=... curl -fsS -X POST -H "Authorization: Bearer $AETHRA_CRON_SECRET" http://127.0.0.1:3000/api/cron/run`, or the one-shot worker `*/15 * * * * cd /opt/aethra && npm run worker` (no HTTP). Both call the same `processDueJobs()`.
 
 ## Evaluation simulation
 
@@ -155,10 +172,12 @@ The automated assertions (`tests/evaluation.test.ts`) verify: every scheduled oc
 | Pre-publication quality gate (all checks) | `tests/quality.test.ts` |
 | Accelerated 48-hour simulation (cadence + full pipeline) | `tests/jobs.test.ts`, `tests/evaluation.test.ts` |
 | Bounded persisted state (no unbounded growth across many runs) | `tests/engine.test.ts` |
+| Scheduler health (last cron run, next due) + cron webhook auth | `tests/health.test.ts` |
 
 ## Known operational limits
 
-- **Single-node SQLite** — durable and crash-safe (WAL, busy timeout, foreign keys) but not horizontally scalable; the lease model assumes one shared database. A production multi-region deployment would move to Postgres with the same table shapes.
+- **Single-node SQLite** — durable and crash-safe (WAL, busy timeout, foreign keys) but not horizontally scalable; the lease model assumes one shared database. A production multi-region deployment would move to Postgres with the same table shapes. Consequently the app cannot run on Vercel serverless (read-only filesystem, ephemeral `/tmp`) — the committed scheduler targets a single always-on Linux host.
+- **Health is scheduler-scoped** — `GET /api/health` reports the last successful cron tick and the next due job from `scheduled_jobs`; there is no per-tick audit trail of *failed* runs (a degraded job surfaces via `jobs.degraded` and `last_error`, not a run history).
 - **Persona-global pipeline** — the discovery/editorial pipeline is one Ada persona feeding all agent sessions; candidates and decisions carry no `agent_id`, and the once-only `published_post_id` guard prevents cross-agent duplicate publication. Per-persona isolation would require adding `agent_id` to `discovery_*` and scoping the editorial queries.
 - **In-memory agent session** — the dashboard's live session is in-memory; reloading re-initializes it. The durable records (posts, runs, jobs, decisions, memory) all survive restart.
 - **Local LLM provider is the default** — deterministic and offline by design; the `openai` provider is a thin `/chat/completions` client behind the same schema-validation/repair path, but hasn't been evaluated for latency/cost under load.

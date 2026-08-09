@@ -1789,6 +1789,46 @@ export function getScheduledJobByAgent(agentId: string): ScheduledJobRow | null 
   return r == null ? null : mapScheduledJobRow(r as Record<string, unknown>);
 }
 
+// ---------------------------------------------------------------------------
+// Scheduler health (GET /api/health)
+// ---------------------------------------------------------------------------
+
+export interface SchedulerHealth {
+  agents: number;
+  /** Jobs whose recurring cadence is live. */
+  activeJobs: number;
+  /** Jobs whose most recent occurrence failed (last_error set). */
+  degradedJobs: number;
+  /** Last successful run across all jobs (last_run_at is set only on success). */
+  lastRunAtMs: number | null;
+  /** Earliest next occurrence among active jobs. */
+  nextDueAtMs: number | null;
+}
+
+/** Aggregate scheduler status for the health endpoint. */
+export function getSchedulerHealth(): SchedulerHealth {
+  const d = getDb();
+  const agents = Number((d.prepare('SELECT COUNT(*) AS n FROM agents').get() as { n: number }).n);
+  const counts = d
+    .prepare(`SELECT status, COUNT(*) AS n FROM scheduled_jobs GROUP BY status`)
+    .all() as Array<{ status: string; n: number }>;
+  const byStatus = Object.fromEntries(counts.map(c => [c.status, Number(c.n)]));
+  const degraded = d
+    .prepare(`SELECT COUNT(*) AS n FROM scheduled_jobs WHERE last_error IS NOT NULL`)
+    .get() as { n: number };
+  const lastRun = d.prepare('SELECT MAX(last_run_at) AS v FROM scheduled_jobs').get() as { v: number | null };
+  const nextDue = d
+    .prepare(`SELECT MIN(next_run_at) AS v FROM scheduled_jobs WHERE status = 'active'`)
+    .get() as { v: number | null };
+  return {
+    agents,
+    activeJobs: byStatus.active ?? 0,
+    degradedJobs: Number(degraded.n),
+    lastRunAtMs: lastRun.v == null ? null : Number(lastRun.v),
+    nextDueAtMs: nextDue.v == null ? null : Number(nextDue.v)
+  };
+}
+
 /**
  * Atomically claim one due occurrence. The guard lives in the WHERE clause, so
  * only one worker (this process) wins even under concurrent claims; expired
