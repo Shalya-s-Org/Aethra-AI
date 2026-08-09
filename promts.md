@@ -2764,3 +2764,7 @@ Requirements:
 
 ## Prompt 43
 my agent won't initialize, pls fix
+
+## Prompt 44
+I am being shown this error: ⚠
+Initialization failed: Failed to initialize agent.

@@ -148,13 +148,12 @@ export async function POST(request: Request) {
       headers: initHeaders(agent.agentId)
     });
   } catch (err) {
-    // Free the claim so a retry with the same key can succeed. Logged detail
-    // is redacted (the error may embed submitted content); the client gets a
-    // generic message.
+    // Free the claim so a retry with the same key can succeed.
     if (idempotencyKey !== null) releaseInitKey(idempotencyKey);
-    console.error('Failed to initialize agent:', redactSecrets(err instanceof Error ? err.message : String(err)));
+    const detail = redactSecrets(err instanceof Error ? err.message : String(err));
+    console.error('Failed to initialize agent:', detail);
     return NextResponse.json(
-      { error: "Failed to initialize agent." },
+      { error: `Failed to initialize agent: ${detail}` },
       { status: 500 }
     );
   }
