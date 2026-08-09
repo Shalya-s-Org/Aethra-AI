@@ -84,6 +84,8 @@ Copy `.env.example` to `.env` and fill in local values. Secrets live only in env
 | `AETHRA_GITHUB_REPOS` | GitHub owner/repo allowlist for releases feeds | built-in default |
 | `AETHRA_LAB_FEEDS` | AI-lab RSS/Atom allowlist (https only) | built-in default |
 | `AETHRA_SIM_ACCELERATION` | Schedule-interval compression for the accelerated simulation mode (unset in production) | unset |
+| `AETHRA_SIMILARITY` | Duplicate-ladder similarity mode: `auto` (embeddings when a key is present, else lexical), `embeddings`, or `lexical` | `auto` |
+| `AETHRA_EMBEDDINGS_API_KEY` / `BASE_URL` / `MODEL` / `TIMEOUT_MS` | Optional embeddings endpoint for semantic near-duplicate detection (`AETHRA_EMBEDDINGS_*` override `AETHRA_LLM_*`) | — |
 | `AETHRA_SOURCE_STALE_MS` | Source-freshness threshold: a source whose last successful fetch is older than this is STALE (source-quality credit capped) | 7 days |
 | `AETHRA_DISCOVERY_MAX_PER_SOURCE` | Max candidates from one source type per editorial run (intake diversity) | 6 |
 | `AETHRA_DIVERSITY_MAX_POSTS_PER_TYPE` | Max posts from one source type in the rolling 24h (feed diversity; breaking-security items exempt) | 2 |
@@ -194,6 +196,7 @@ Replay also proves the runner never requests an un-allowlisted URL: anything out
 | Database failure (transient retry + backoff, atomic rollback on constraint failure) | `tests/jobs.test.ts` |
 | LLM failure, malformed JSON, corrective retry, fabricated citations, opening variation/avoidance, provider resolution | `tests/llm.test.ts` |
 | Duplicate detection + evolving-story follow-ups | `tests/memory.test.ts`, `tests/editorial-memory.test.ts` |
+| Semantic duplicate detection (embeddings cache, degradation, near-dup/paraphrase/update/unrelated) | `tests/embeddings.test.ts` |
 | Per-agent isolation (no cross-agent publication, decision theft, or memory leakage) | `tests/isolation.test.ts` |
 | Persona consistency (relevance, rejection, prompt, quality, memory) | `tests/persona.test.ts` |
 | Editorial thresholds, duplicates, recency, tie-breaks | `tests/editorial.test.ts` |
@@ -211,6 +214,6 @@ Replay also proves the runner never requests an un-allowlisted URL: anything out
 - **In-memory agent session** — the dashboard's live session is in-memory; reloading re-initializes it. The durable records (posts, runs, jobs, decisions, memory) all survive restart.
 - **Legacy sim engine is test-only** — the old stage-machine simulation (`advanceAgentById`/`advanceTo` in `src/lib/agentEngine.ts`) is never advanced in production: scheduled cycles run only the real discovery → editorial → publication pipeline, and the dashboard's activity readouts are derived from persisted records (`agent_runs`, posts, decisions, fetches, `memory_entries`). Seed **demo posts** are marked `is_demo` and excluded from the judged `GET /api/agent/feed`; no other fabricated content is seeded.
 - **Provider resolution is auto** — unset resolves to `openai` when `AETHRA_LLM_API_KEY` is present or `NODE_ENV=production` (no key in production → failing provider, nothing weak published); otherwise `local` (deterministic, offline). The `openai` provider is a thin `/chat/completions` client behind the same schema-validation/repair path, but hasn't been evaluated for latency/cost under load. The local provider varies openings by selecting among Ada's **approved writing patterns** and avoiding recent openings, so even offline output isn't byte-identical templates.
-- **No embeddings** — the semantic-similarity duplicate ladder is keyword/token-based behind an interface; embeddings are the documented future seam, not an implemented backend.
+- **Semantic detection is optional and degraded-safe** — the duplicate ladder always runs its deterministic checks first (canonical URL → normalized title → keyword/topic overlap); the embeddings step (level 4) only adds a finding when real vectors exist. Vectors are cached durably per agent/persona scope (`embeddings` table); a missing key, an unavailable endpoint, or an embed failure degrades per-item to the deterministic lexical provider — never a crash, never a semantic override of a stronger finding. `AETHRA_SIMILARITY=lexical` disables it outright.
 - **Quality-gate hold loop** — a gate-held draft is re-generated and re-gated on each run; with the deterministic local provider this loops harmlessly (the draft never changes), but with a real LLM it becomes a genuine revision loop.
 - **Rate-limit cadence** — the routine interval (6h) and daily cap (4/24h) are editorial constants; a deployment tuning them must restart the editorial engine or make them configurable.

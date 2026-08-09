@@ -156,7 +156,9 @@ export function getRelevantMemory(
   candidate: MemorySource,
   opts: { provider?: SimilarityProvider; items?: MemoryItem[]; persona?: Persona } = {}
 ): RelevantMemory {
-  const provider = opts.provider ?? createSimilarityProvider();
+  // The provider is scoped to the same agent as the memory it compares
+  // against, so an embeddings cache lookup never crosses scopes.
+  const provider = opts.provider ?? createSimilarityProvider(agentId);
   const items = opts.items ?? gatherMemoryItems(agentId);
   const duplicate = detectDuplicate(
     { title: candidate.title, summary: candidate.summary, canonicalUrl: candidate.canonicalUrl },
@@ -263,7 +265,7 @@ export function linkRelatedPosts(
   nowMs: number,
   opts: { provider?: SimilarityProvider } = {}
 ): PostLinkInfo[] {
-  const provider = opts.provider ?? createSimilarityProvider();
+  const provider = opts.provider ?? createSimilarityProvider(agentId);
   const posts = getRecentPostsForMemory(agentId, 100);
   const newPost = posts.find(p => p.id === newPostId);
   if (!newPost) return [];

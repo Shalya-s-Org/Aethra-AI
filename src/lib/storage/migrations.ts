@@ -761,5 +761,42 @@ export const MIGRATIONS: Migration[] = [
         updated_at           TEXT NOT NULL
       );
     `
+  },
+  {
+    id: '012_semantic_embeddings',
+    // Durable embeddings cache for the duplicate ladder's level-4 semantic
+    // step. agent_id NULL = persona scope (same convention as memory_entries);
+    // a real agent id = that agent's scope, so one agent's vectors never leak
+    // into another's similarity comparisons. The cache is keyed by the content
+    // hash + model; the provider re-embeds a key only when the model changes.
+    // It is a CACHE of derived data — dropping it only degrades level 4 back
+    // to the deterministic lexical checks (the ladder always runs 1 → 2 → 3
+    // first, so semantics can never override a URL/title/keyword finding).
+    sqlite: `
+      CREATE TABLE embeddings (
+        agent_id    TEXT REFERENCES agents(id) ON DELETE CASCADE,
+        content_key TEXT NOT NULL,
+        model       TEXT NOT NULL,
+        vector_json TEXT NOT NULL,
+        created_at  TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX idx_embeddings_scope_key
+        ON embeddings (COALESCE(agent_id, ''), content_key, model);
+      CREATE INDEX idx_embeddings_scope
+        ON embeddings (agent_id, created_at);
+    `,
+    postgres: `
+      CREATE TABLE embeddings (
+        agent_id    TEXT REFERENCES agents(id) ON DELETE CASCADE,
+        content_key TEXT NOT NULL,
+        model       TEXT NOT NULL,
+        vector_json TEXT NOT NULL,
+        created_at  TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX idx_embeddings_scope_key
+        ON embeddings (COALESCE(agent_id, ''), content_key, model);
+      CREATE INDEX idx_embeddings_scope
+        ON embeddings (agent_id, created_at);
+    `
   }
 ];

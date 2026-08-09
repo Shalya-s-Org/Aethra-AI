@@ -1446,6 +1446,67 @@ export function getRecentMemoryEntries(opts: {
   return rows.map(mapMemoryEntryRow);
 }
 
+// Durable embeddings cache (migration 012): agent/persona-scoped vectors for
+// the duplicate ladder's level-4 semantic step. See src/lib/memory/embeddings.ts
+// for the provider that reads/writes these rows.
+
+export interface EmbeddingRow {
+  agentId: string | null;
+  contentKey: string;
+  model: string;
+  vector: number[];
+  createdAt: string;
+}
+
+function mapEmbeddingRow(r: Record<string, unknown>): EmbeddingRow {
+  return {
+    agentId: (r.agent_id as string | null) ?? null,
+    contentKey: r.content_key as string,
+    model: r.model as string,
+    vector: JSON.parse(r.vector_json as string) as number[],
+    createdAt: r.created_at as string
+  };
+}
+
+/** The cached embedding for (scope, content key, model), if any. */
+export function getEmbedding(
+  agentId: string | null,
+  contentKey: string,
+  model: string
+): EmbeddingRow | null {
+  const row = getDb()
+    .prepare(
+      `SELECT * FROM embeddings
+       WHERE COALESCE(agent_id, '') = COALESCE(?, '') AND content_key = ? AND model = ?`
+    )
+    .get(agentId ?? '', contentKey, model);
+  return row ? mapEmbeddingRow(row) : null;
+}
+
+/** Insert-or-replace an embedding for (scope, content key, model). */
+export function upsertEmbedding(input: {
+  agentId: string | null;
+  contentKey: string;
+  model: string;
+  vector: number[];
+  nowMs: number;
+}): void {
+  getDb()
+    .prepare(
+      `INSERT INTO embeddings (agent_id, content_key, model, vector_json, created_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (COALESCE(agent_id, ''), content_key, model)
+       DO UPDATE SET vector_json = excluded.vector_json, created_at = excluded.created_at`
+    )
+    .run(
+      input.agentId,
+      input.contentKey,
+      input.model,
+      JSON.stringify(input.vector),
+      iso(input.nowMs)
+    );
+}
+
 /** Recent real (non-demo) posts of an agent, with canonical source URLs —
  *  short-term memory and the link-ladder's memory set for an agent scope. */
 export interface PostMemoryRow {

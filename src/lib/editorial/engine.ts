@@ -31,6 +31,7 @@ import {
   recordMemoryForAccepted,
   type RelevantMemory
 } from '../memory/memory';
+import { createSimilarityProvider } from '../memory/similarity';
 import { getPersona, type Persona } from '../persona';
 import {
   candidateIdentifierText,
@@ -200,13 +201,30 @@ export async function runEditorial(options: EditorialRunOptions): Promise<Editor
   const staleSources = unhealthySourceNames(getSourceHealth(), now);
 
   // Durable memory (this agent's scope): one ladder run per candidate against
-  // the same gathered memory set, so the batch is deterministic.
+  // the same gathered memory set, so the batch is deterministic. The similarity
+  // provider is created once per run, scoped to this agent, and warmed with the
+  // full memory + candidate set — a network embeddings provider embeds each
+  // unique title ONCE into the durable cache; failures degrade per-item to the
+  // lexical checks (the ladder still runs URL → title → keyword first).
   const memoryItems = gatherMemoryItems(options.agentId, { source: 'decisions' });
+  const similarityProvider = createSimilarityProvider(options.agentId);
+  if (similarityProvider.warm) {
+    try {
+      await similarityProvider.warm([...memoryItems, ...pending]);
+    } catch {
+      // A failed warm-up must never block scoring — comparisons fall back to
+      // the deterministic lexical provider.
+    }
+  }
   const memoryByCandidate = new Map<string, RelevantMemory>();
   for (const candidate of pending) {
     memoryByCandidate.set(
       candidate.id,
-      getRelevantMemory(options.agentId, candidate, { items: memoryItems, persona })
+      getRelevantMemory(options.agentId, candidate, {
+        items: memoryItems,
+        persona,
+        provider: similarityProvider
+      })
     );
   }
 
