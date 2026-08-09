@@ -135,14 +135,14 @@ npm run evaluate        # prints a report (dedicated scratch DB, .data/evaluatio
 npm test                # full suite incl. the automated evaluation invariants
 ```
 
-The automated assertions (`tests/evaluation.test.ts`) verify: every scheduled occurrence completes exactly once; posts respect the 6h routine interval and the 4-per-24h cap; canonical URLs and idempotency keys are unique; accepted decisions all carry a `passed` quality-gate report; duplicates are rejected (not published); and `GET /feed` is a read-only projection before, during, and after the simulation. No demo content ever reaches the judged feed.
+The automated assertions (`tests/evaluation.test.ts`) verify: every scheduled occurrence completes exactly once; posts respect the 6h routine interval and the 4-per-24h cap; canonical URLs and idempotency keys are unique; accepted decisions all carry a `passed` quality-gate report; duplicates are rejected (not published); and the judged feed is exactly the persisted posts, reverse-chronological (`GET /feed` never triggers publishing is asserted in `tests/api.test.ts`). No demo content ever reaches the judged feed.
 
 ## Test suite (evaluation matrix)
 
 | Requirement | Where it's tested |
 |---|---|
 | API contract (init shape/validation, feed shape/ordering) | `tests/api.test.ts` |
-| GET /feed never triggers publishing, discovery, or scheduling | `tests/api.test.ts`, `tests/evaluation.test.ts` |
+| GET /feed never triggers publishing, discovery, or scheduling | `tests/api.test.ts` |
 | Persistence + restart recovery (posts, engine state, mid-run crash) | `tests/db.test.ts`, `tests/engine.test.ts` |
 | Concurrent initialization (same Idempotency-Key races share one agent) | `tests/api.test.ts` |
 | Concurrent worker runs (lease exclusivity, expiry recovery) | `tests/jobs.test.ts` |

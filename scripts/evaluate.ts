@@ -60,7 +60,7 @@ async function main(): Promise<void> {
   lines.push(`  agent:        ${agentId}`);
   lines.push(`  horizon:      48h sim-time, 6h production cadence, 6x acceleration (1h effective)`);
   lines.push(`  occurrences:  ${result.steps} (${result.summaries.filter(s => !s.ok).length} failed)`);
-  lines.push(`  candidates:   ${result.summaries.length > 0 ? 'fixture-derived stream (8 per batch)' : ''}`);
+  lines.push('  candidates:   deterministic fixture-derived stream (8 per batch)');
   lines.push(`  decisions:    accepted=${byKind.accepted ?? 0} held=${byKind.held ?? 0} rejected=${byKind.rejected ?? 0}`);
   lines.push(`  posts:        ${posts.length} published (max ${TEMPLATES.length} templates)`);
   if (times.length > 0) {

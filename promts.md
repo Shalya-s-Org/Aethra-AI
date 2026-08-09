@@ -2620,3 +2620,6 @@ Add a concise README covering:
 - known operational limits
 
 Run lint, typecheck, build, and the complete test suite. Report failures honestly and do not leave fake demo content in the production feed.
+
+## Prompt 32
+/simplify

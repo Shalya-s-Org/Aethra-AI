@@ -1,37 +1,39 @@
 // Evaluation harness (shared by tests/evaluation.test.ts and scripts/evaluate.ts).
 //
-// This is the hackathon's 48-hour evaluation simulation: it drives the REAL
-// production pipeline — discovery → editorial scoring → LLM generation →
-// pre-publication quality gate → transactional gated publication — through the
-// durable job queue, exactly as an external cron would, but with a virtual
-// clock and an acceleration factor so 48 sim-hours complete in seconds.
+// The 48-hour evaluation simulation drives the REAL production pipeline —
+// discovery → editorial scoring → LLM generation → pre-publication quality
+// gate → transactional gated publication — through the durable job queue,
+// exactly as an external cron would, but with a virtual clock so 48 sim-hours
+// complete in seconds.
 //
-// Determinism: no network, no randomness. Each occurrence injects a fixture-
-// derived stream of candidates (the same shapes the real adapters produce —
-// see tests/fixtures/) with per-occurrence identifiers, so the duplicate
-// detector, routine interval, daily cap, and quality gate all see realistic,
-// reproducible input. Production behavior is untouched: acceleration only
-// compresses schedule intervals (timeFactor) inside the queue.
+// Determinism: no network, no randomness. Each occurrence injects a
+// fixture-derived stream of candidates (the same shapes the real adapters
+// produce — see tests/fixtures/) with per-occurrence identifiers, so the
+// duplicate detector, routine interval, daily cap, and quality gate all see
+// realistic, reproducible input.
 //
 // Sizing: the production cadence is 6h (the routine posting interval), so a
-// 48h horizon is 8 routine slots; with timeFactor 6 the effective interval is
-// 1h → 48 recurring occurrences. That is enough to exercise the 6h interval,
-// the 24h rolling cap (the 5th slot is held and pushed out), and duplicate
-// rejection across occurrences, while keeping the test at ~2s.
+// 48h horizon is 8 routine slots; a 6x acceleration makes the effective
+// interval 1h → 48 recurring occurrences. That exercises the 6h interval, the
+// 24h rolling cap (the 5th slot is held and pushed out), and duplicate
+// rejection across occurrences in ~2s. Production behavior is untouched —
+// acceleration only compresses schedule intervals inside the queue.
 
+import assert from 'node:assert/strict';
 import { makeCandidate } from '../src/lib/discovery/types';
 import { insertDiscoveryCandidate } from '../src/lib/db';
-import type { DiscoverySummary } from '../src/lib/discovery/runner';
 import { JobQueue } from '../src/lib/jobs/queue';
 import { runAgentCycle } from '../src/lib/jobs/cycle';
 
 const HOUR = 3600_000;
+/** Schedule-interval compression for the automated evaluation mode. */
+const SIM_ACCELERATION = 6;
 
 // Eight distinct vulnerability templates (AI-security persona). Titles are
 // deliberately low-overlap so the deterministic title-similarity duplicate
 // check treats each template as a new story, and summaries carry CVE/GHSA
 // identifiers so the candidates are supported, fresh, and gate-passable.
-const TEMPLATES: Array<{ title: string; summary: string }> = [
+export const TEMPLATES: Array<{ title: string; summary: string }> = [
   {
     title: 'Critical prompt injection bypass in LLM agent tool-calling layer allows remote code execution',
     summary:
@@ -74,72 +76,18 @@ const TEMPLATES: Array<{ title: string; summary: string }> = [
   }
 ];
 
-export interface FixtureDiscoveryOptions {
-  /** Sim start time; run index is derived from (now - startMs). */
-  startMs: number;
-  /** Effective (already accelerated) schedule interval. */
-  intervalMs: number;
-}
-
-/** Deterministic, fixture-derived discovery: every occurrence emits all eight
- *  templates with run-scoped identifiers. `insertDiscoveryCandidate` dedups by
- *  canonical URL, so repeats are ignored exactly as the live runner ignores
- *  already-known advisories. */
-export function makeFixtureDiscovery(opts: FixtureDiscoveryOptions): (now: number) => Promise<DiscoverySummary> {
-  return async (now: number) => {
-    const run = Math.max(0, Math.round((now - opts.startMs) / opts.intervalMs));
-    const candidates = [];
-    let newCandidates = 0;
-    for (let t = 0; t < TEMPLATES.length; t++) {
-      const cve = `CVE-2026-${String(run).padStart(4, '0')}${t}01`;
-      const ghsa = `GHSA-${String(run).padStart(4, '0')}-${t}-sim`;
-      const candidate = makeCandidate({
-        title: TEMPLATES[t].title,
-        summary: `${TEMPLATES[t].summary} Patch released. ${cve} assigned. ${ghsa} assigned.`,
-        publishedAt: new Date(now - 2 * HOUR).toISOString(),
-        canonicalUrl: `https://github.com/advisories/${ghsa}`,
-        sourceName: 'GitHub Security Advisories',
-        sourceType: 'github-advisory',
-        // severity "medium" (not high/critical): the breaking-security override
-        // must NOT fire, so the routine interval + daily cap stay testable.
-        rawEvidence: JSON.stringify({ cve_id: cve, ghsa_id: ghsa, severity: 'medium' })
-      });
-      if (candidate) {
-        candidates.push(candidate);
-        if (insertDiscoveryCandidate(candidate, now)) newCandidates += 1;
-      }
-    }
-    return {
-      runId: `eval-sim-run-${run}`,
-      startedAt: new Date(now).toISOString(),
-      finishedAt: new Date(now).toISOString(),
-      candidates,
-      totalCandidates: candidates.length,
-      newCandidates,
-      fetches: [],
-      failures: []
-    };
-  };
-}
-
 export interface EvaluationSimOptions {
   agentId: string;
   /** Sim start (also the first occurrence time). */
   startMs: number;
-  /** Production schedule interval, e.g. 30 minutes. */
+  /** Production schedule interval. */
   scheduleMs: number;
-  /** Simulation horizon in sim-time, e.g. 48 hours. */
+  /** Simulation horizon in sim-time. */
   horizonMs: number;
-  /** Schedule acceleration (1 = production behavior). */
-  timeFactor?: number;
 }
 
 export interface EvaluationSimResult {
   steps: number;
-  startMs: number;
-  horizonMs: number;
-  intervalMs: number;
-  queue: JobQueue;
   summaries: Array<{ ok: boolean; error?: string; summary?: string }>;
 }
 
@@ -148,14 +96,53 @@ export interface EvaluationSimResult {
  *  the queue never loops in production either; each tick is an external cron
  *  delivery. */
 export async function runEvaluationSim(opts: EvaluationSimOptions): Promise<EvaluationSimResult> {
-  const { agentId, startMs, scheduleMs, horizonMs, timeFactor = 6 } = opts;
+  const { agentId, startMs, scheduleMs, horizonMs } = opts;
+  const intervalMs = Math.round(scheduleMs / SIM_ACCELERATION);
   let now = startMs;
-  const intervalMs = Math.max(1, Math.round(scheduleMs / timeFactor));
+
   const queue = new JobQueue({
     now: () => now,
-    timeFactor,
+    timeFactor: SIM_ACCELERATION,
     cycle: async (id: string, at: number) =>
-      runAgentCycle(id, at, { discovery: makeFixtureDiscovery({ startMs, intervalMs }) })
+      runAgentCycle(id, at, {
+        // Deterministic, fixture-derived discovery: every occurrence emits all
+        // eight templates with run-scoped identifiers. insertDiscoveryCandidate
+        // dedups by canonical URL, exactly as the live runner ignores
+        // already-known advisories.
+        discovery: async (discoveryNow: number) => {
+          const run = Math.round((discoveryNow - startMs) / intervalMs);
+          let newCandidates = 0;
+          const candidates = TEMPLATES.map((template, t) => {
+            const cve = `CVE-2026-${String(run).padStart(4, '0')}${t}01`;
+            const ghsa = `GHSA-${String(run).padStart(4, '0')}-${t}-sim`;
+            const candidate = makeCandidate({
+              title: template.title,
+              summary: `${template.summary} Patch released. ${cve} assigned. ${ghsa} assigned.`,
+              publishedAt: new Date(discoveryNow - 2 * HOUR).toISOString(),
+              canonicalUrl: `https://github.com/advisories/${ghsa}`,
+              sourceName: 'GitHub Security Advisories',
+              sourceType: 'github-advisory',
+              // severity "medium" (not high/critical): the breaking-security
+              // override must NOT fire, so the routine interval + daily cap
+              // stay testable.
+              rawEvidence: JSON.stringify({ cve_id: cve, ghsa_id: ghsa, severity: 'medium' })
+            });
+            assert.ok(candidate, 'fixture inputs are fixed and valid');
+            if (insertDiscoveryCandidate(candidate, discoveryNow)) newCandidates += 1;
+            return candidate;
+          });
+          return {
+            runId: `eval-sim-run-${run}`,
+            startedAt: new Date(discoveryNow).toISOString(),
+            finishedAt: new Date(discoveryNow).toISOString(),
+            candidates,
+            totalCandidates: candidates.length,
+            newCandidates,
+            fetches: [],
+            failures: []
+          };
+        }
+      })
   });
   queue.scheduleAgent(agentId, scheduleMs, 0);
 
@@ -166,7 +153,5 @@ export async function runEvaluationSim(opts: EvaluationSimOptions): Promise<Eval
     const tick = await queue.processDueJobs();
     summaries.push(...tick.details.map(d => ({ ok: d.ok, error: d.error, summary: d.summary })));
   }
-  return { steps, startMs, horizonMs, intervalMs, queue, summaries };
+  return { steps, summaries };
 }
-
-export { TEMPLATES };

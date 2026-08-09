@@ -349,7 +349,7 @@ describe('database failure resilience', () => {
     assert.equal(queue.getJob(agentId)!.attempts, 0);
   });
 
-  it('a constraint failure during publication rolls back atomically and is retried (no partial rows, no duplicates)', async () => {
+  it('a constraint failure during publication rolls back atomically — no partial rows, no duplicates', () => {
     const agentId = newAgent();
     seedGatePassedDecision(agentId);
     const decisionId = `decision-${agentId.slice(-6)}`;
@@ -368,54 +368,23 @@ describe('database failure resilience', () => {
     const topicsBefore = countRows('topics', agentId);
     const sourcesBefore = countRows('sources', agentId);
 
-    let now = T0;
-    let first = true;
-    const queue = new JobQueue({
-      owner: 'A',
-      now: () => now,
-      backoffMs: 1000,
-      cycle: async (id, at) => {
-        // Publication only (no sim advance / discovery / editorial): this test
-        // isolates the transactional publication step's atomicity.
-        if (first) {
-          first = false;
-          publishPublishablePosts(id, at);
-          return { ok: true, summary: 'unreachable' };
-        }
-        publishPublishablePosts(id, at);
-        return { ok: true, summary: 'recovered' };
-      }
-    });
-    queue.scheduleAgent(agentId, 30 * MIN, 0);
-
-    const tick = await queue.processDueJobs();
-    assert.equal(tick.completed, 0);
-    assert.equal(tick.terminal, 0);
-    const job = queue.getJob(agentId)!;
-    assert.match(job.lastError ?? '', /UNIQUE|constraint/i);
-
-    // Atomic rollback: exactly the pre-existing post remains — the topic and
-    // source inserts rolled back with the failed post, and the decision is
-    // still unpublished (a re-delivered occurrence can publish it later).
+    // The duplicate idempotency key violates UNIQUE(agent_id, idempotency_key)
+    // inside the publication transaction, so the whole transaction rolls back
+    // (the queue's catch-and-backoff on thrown cycle errors is covered by the
+    // transient-failure test above).
+    assert.throws(() => publishPublishablePosts(agentId, T0), /UNIQUE|constraint/i);
     assert.equal(getPostsByAgent(agentId).length, 1, 'no duplicate post may exist');
+    assert.equal(countRows('topics', agentId), topicsBefore, 'topic insert must roll back with the failed post');
+    assert.equal(countRows('sources', agentId), sourcesBefore, 'source insert must roll back with the failed post');
     assert.equal(
-      countRows('topics', agentId),
-      topicsBefore,
-      'topic insert must roll back with the failed post'
+      getDiscoveryDecisions({ limit: 10 }).find(r => r.id === decisionId)?.publishedPostId,
+      null,
+      'decision must stay unpublished after a rolled-back publish'
     );
-    assert.equal(
-      countRows('sources', agentId),
-      sourcesBefore,
-      'source insert must roll back with the failed post'
-    );
-    const row = getDiscoveryDecisions({ limit: 10 }).find(r => r.id === decisionId);
-    assert.equal(row?.publishedPostId, null, 'decision must stay unpublished after a rolled-back publish');
 
-    // Recovery: remove the conflicting row; the next occurrence publishes once.
+    // Recovery: clear the conflict; the decision then publishes exactly once.
     getDb().prepare(`DELETE FROM posts WHERE idempotency_key = ?`).run(`decision:${decisionId}`);
-    now += 1000;
-    const second = await queue.processDueJobs();
-    assert.equal(second.completed, 1);
+    assert.equal(publishPublishablePosts(agentId, T0), 1);
     assert.equal(getPostsByAgent(agentId).length, 1);
     assert.ok(
       getDiscoveryDecisions({ limit: 10 }).find(r => r.id === decisionId)?.publishedPostId,
