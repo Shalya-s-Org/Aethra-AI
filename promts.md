@@ -2771,3 +2771,6 @@ Initialization failed: Failed to initialize agent.
 
 ## Prompt 45
 I'm hosting this project on vercel- error shown now is Initialization failed: Failed to initialize agent: ENOENT: no such file or directory, mkdir '/var/task/.data' and ensure everything is working on vercel deployment
+
+## Prompt 46
+Why is there no data on my web page on vercel, fix it
