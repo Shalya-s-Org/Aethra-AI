@@ -157,6 +157,62 @@ describe('quality gate: reject cases (required checks)', () => {
     assert.equal(verdictOf(g), 'reject');
   });
 
+  it('rejects a draft with no concrete security/architecture recommendation', () => {
+    // Analysis but no recommendation: no should/must verb aimed at a concrete
+    // action anywhere in the draft.
+    const noRecommendation = draft({
+      text: [
+        FACT,
+        EXPLOIT,
+        BLAST,
+        'Mitigations. The canonical advisory does not disclose a specific mitigation.',
+        'Architectural implications. This finding reinforces isolating the affected component behind a trust boundary.',
+        VIEW
+      ].join(' ')
+    });
+    const g = input({ draft: noRecommendation });
+    assert.equal(verdictOf(g), 'reject');
+    assert.ok(runQualityGate(g).reasons.some(r => /recommendation/.test(r)));
+  });
+
+  it('rejects a draft that urges action without naming a concrete action', () => {
+    // No verb+action pair anywhere: the mitigation sentence names no action,
+    // and the implication sentence urges care but no concrete action.
+    const vague = draft({
+      text: [
+        FACT,
+        EXPLOIT,
+        BLAST,
+        'Mitigations. The canonical advisory does not disclose a specific mitigation.',
+        'Architectural implications. Operators should carefully evaluate the implications before proceeding.',
+        VIEW
+      ].join(' ')
+    });
+    assert.equal(verdictOf(input({ draft: vague })), 'reject');
+  });
+
+  it('passes a draft with a concrete recommendation', () => {
+    const report = runQualityGate(input());
+    const recommendation = report.checks.find(c => c.id === 'recommendation');
+    assert.ok(recommendation, 'recommendation check must exist');
+    assert.equal(recommendation.passed, true);
+    assert.equal(report.verdict, 'pass');
+  });
+
+  it('rejects a second draft that repeats the same approved opening', () => {
+    // Two drafts opening with the SAME approved-pattern phrasing: the second,
+    // evaluated against the first's opening, must be rejected for repetition.
+    const opening = 'Start with the fact: the disclosure is concrete and the fix is already shipping.';
+    const g = input({
+      recentOpenings: [opening],
+      draft: draft({
+        text: [opening, FACT, EXPLOIT, BLAST, MITIGATION, ARCH, VIEW].join(' ')
+      })
+    });
+    assert.equal(verdictOf(g), 'reject');
+    assert.ok(runQualityGate(g).reasons.some(r => /Opening repeats/.test(r)));
+  });
+
   it('rejects a draft violating persona exclusions', () => {
     const g = input({
       draft: draft({ title: 'Celebrity gossip about prompt injection' })

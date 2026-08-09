@@ -36,6 +36,10 @@ export interface GenerationInput {
   themes: string[];
   /** Other candidates of the batch, for the "why it beat them" rationale. */
   competing: CompetingCandidate[];
+  /** Opening phrasings of recently generated posts — the writer must avoid
+   *  reusing them (the local provider picks a pattern that differs; the LLM
+   *  is told to choose a different opening). */
+  recentOpenings?: string[];
   /** Defaults to createLlmProvider() (deterministic local, no network). */
   provider?: LlmProvider;
   /** Corrective retries after schema validation failure. Default 1. */
@@ -109,7 +113,8 @@ export async function generatePost(input: GenerationInput): Promise<GenerationOu
     candidate: input.candidate,
     followUp: input.followUp,
     themes: input.themes,
-    competing: input.competing
+    competing: input.competing,
+    recentOpenings: input.recentOpenings
   });
 
   const maxRetries = input.maxRetries ?? 1;

@@ -173,6 +173,38 @@ export const ADA: Persona = {
     'Write for engineers: precise terminology, no buzzword padding, no marketing framing.'
   ],
 
+  // Approved writing patterns: openings / transitions / closings that keep
+  // posts varied while staying in Ada's calm, evidence-bound voice. `{item}`
+  // is a short candidate reference (identifiers + short title). Writers pick
+  // deterministically per candidate and avoid recently used openings; the
+  // quality gate's variation check is the enforcement backstop.
+  writingPatterns: {
+    openings: [
+      'The finding is concrete: {item} carries a defined failure mode and a fix to verify.',
+      'Start with the fact: {item} landed with attacker-relevant detail attached, and the fix is already shipping.',
+      '{item} is not a headline; it is a reproducible failure with a named component and a remediation path.',
+      'The record for {item} is specific enough to reason about: component, failure mode, and remediation are all named.',
+      'For anyone running the affected component, {item} changes the calculus today rather than next quarter.',
+      'What matters first about {item} is that the evidence names the mechanism, not just the vendor.',
+      'The useful question about {item} is not whether it matters, but where it bites.',
+      'Strip the severity label and {item} still stands on its own: a defined flaw with a concrete blast radius.'
+    ],
+    transitions: [
+      'What matters operationally is the blast radius, not the headline.',
+      'Read that against how the component is actually deployed.',
+      'The engineering takeaway follows from the failure mode.',
+      'Where this bites in practice is the trust boundary it crosses.',
+      'The architectural lesson is broader than the specific fix.',
+      'Calibrate the risk before acting on the vendor framing.'
+    ],
+    closings: [
+      'Ada\'s read: treat {item} as confirmed until the patch is verified, then audit for the same pattern elsewhere.',
+      'The stance here is unchanged: verify the fix, then audit for the same pattern elsewhere.',
+      'Confidence is calibrated to the evidence: the mechanism is clear; the reach is not yet quantified.',
+      'Until the advisory quantifies reach, this stays on the watch list rather than the incident list.'
+    ]
+  },
+
   postStructure: [
     {
       id: 'title',

@@ -367,7 +367,10 @@ export async function runEditorial(options: EditorialRunOptions): Promise<Editor
   const provider = options.provider ?? createLlmProvider();
   const recent = getRecentGeneratedAccepted(options.agentId, 20);
   const recentTitles = recent.map(r => r.title);
-  const recentOpenings = recent.map(r => {
+  // Rolling openings: previously generated posts PLUS this batch's own drafts,
+  // so generation varies openings and the gate's variation check catches
+  // in-batch repetition too (never deterministic-template-looking output).
+  const rollingOpenings: string[] = recent.map(r => {
     try {
       return openingOf((JSON.parse(r.generatedJson) as { text?: string }).text ?? '');
     } catch {
@@ -386,6 +389,7 @@ export async function runEditorial(options: EditorialRunOptions): Promise<Editor
         score: e.scored.total,
         kind: e.kind
       })),
+      recentOpenings: rollingOpenings.filter(o => o.length > 0),
       provider
     });
     if (!outcome.ok) {
@@ -399,15 +403,19 @@ export async function runEditorial(options: EditorialRunOptions): Promise<Editor
     }
     entry.generation = { status: 'generated', json: outcome.raw };
 
+    // The gate compares against PRIOR openings (DB history + earlier drafts in
+    // this batch) — never the draft's own opening, which would trivially
+    // match itself. The opening joins the rolling set only after the gate.
     const report: QualityGateReport = runQualityGate({
       persona,
       candidate: entry.scored.candidate,
       draft: outcome.post,
       followUp: entry.scored.flags.meaningfulFollowUp,
       recentTitles,
-      recentOpenings,
+      recentOpenings: rollingOpenings.filter(o => o.length > 0),
       sourceQualityScore: entry.scored.components.sourceQuality
     });
+    rollingOpenings.push(openingOf(outcome.post.text));
     entry.quality = {
       status: report.verdict === 'pass' ? 'passed' : report.verdict === 'hold' ? 'held' : 'rejected',
       json: JSON.stringify(report)

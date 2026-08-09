@@ -56,6 +56,22 @@ export interface PersonaConfidenceRules {
   uncertaintyPhrases: string[];
 }
 
+/**
+ * Approved writing patterns so openings, transitions, and closings do not
+ * repeat across posts. Each pattern is a sentence template with a `{item}`
+ * slot (a short reference to the candidate — identifier(s) + short title).
+ * Writers pick from these deterministically per candidate (and avoid recent
+ * openings); the quality gate's variation check is the enforcement backstop.
+ */
+export interface PersonaWritingPatterns {
+  /** First-sentence opening moves. */
+  openings: string[];
+  /** Section-to-section transitions. */
+  transitions: string[];
+  /** Closing moves for Ada's view / confidence. */
+  closings: string[];
+}
+
 export interface Persona {
   id: string;
   name: string;
@@ -72,6 +88,8 @@ export interface Persona {
   topicsToAvoid: string[];
   vocabulary: PersonaVocabulary;
   styleRules: string[];
+  /** Approved opening/transition/closing patterns (variety without drift). */
+  writingPatterns: PersonaWritingPatterns;
   postStructure: PersonaSection[];
   confidenceRules: PersonaConfidenceRules;
 }

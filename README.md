@@ -77,8 +77,8 @@ Copy `.env.example` to `.env` and fill in local values. Secrets live only in env
 | `AETHRA_DB_PATH` | SQLite database file (durable persistence) | `.data/aethra.db` |
 | `DATABASE_URL` | Postgres connection string — required when `AETHRA_STORAGE=postgres` | — |
 | `AETHRA_CRON_SECRET` | Bearer secret for `POST /api/cron/run` — **required in production**; when unset, `x-vercel-cron: 1` is required (local dev) | unset |
-| `AETHRA_LLM_PROVIDER` | `local` (deterministic, offline — the test provider) or `openai` | `local` |
-| `AETHRA_LLM_API_KEY` | Required when provider ≠ `local` | — |
+| `AETHRA_LLM_PROVIDER` | `local` (deterministic, offline — test/offline only), `openai`, or unset (auto) | unset (auto) |
+| `AETHRA_LLM_API_KEY` | Required for `openai` (or auto in production; auto in production without a key fails loudly — never a silent deterministic fallback) | — |
 | `AETHRA_LLM_BASE_URL` / `AETHRA_LLM_MODEL` / `AETHRA_LLM_TIMEOUT_MS` | OpenAI-compatible endpoint overrides | OpenAI defaults |
 | `AETHRA_ARXIV_QUERY` | arXiv query phrases | built-in default |
 | `AETHRA_GITHUB_REPOS` | GitHub owner/repo allowlist for releases feeds | built-in default |
@@ -98,7 +98,7 @@ cp .env.example .env            # optional; defaults work out of the box
 npm run dev                     # http://localhost:3000
 ```
 
-The default LLM provider is `local` — fully deterministic and offline — so the whole pipeline runs with no API key. Local development uses only the external scheduler, exactly like production; to advance due agents manually:
+With no API key and no `NODE_ENV=production`, the LLM provider resolves to `local` — fully deterministic and offline — so the whole pipeline runs out of the box. The moment a key is present (or in production), the OpenAI-compatible provider is used; production without a key **fails loudly** rather than emitting deterministic template output. Local development uses only the external scheduler, exactly like production; to advance due agents manually:
 
 ```bash
 npm run worker                                    # one-shot tick (no HTTP)
@@ -192,12 +192,12 @@ Replay also proves the runner never requests an un-allowlisted URL: anything out
 | High-impact claims require corroboration or a primary advisory | `tests/editorial-diversity.test.ts` |
 | Per-source health counters + freshness (stale-source quality cap) | `tests/editorial-diversity.test.ts` |
 | Database failure (transient retry + backoff, atomic rollback on constraint failure) | `tests/jobs.test.ts` |
-| LLM failure, malformed JSON, corrective retry, fabricated citations | `tests/llm.test.ts` |
+| LLM failure, malformed JSON, corrective retry, fabricated citations, opening variation/avoidance, provider resolution | `tests/llm.test.ts` |
 | Duplicate detection + evolving-story follow-ups | `tests/memory.test.ts`, `tests/editorial-memory.test.ts` |
 | Per-agent isolation (no cross-agent publication, decision theft, or memory leakage) | `tests/isolation.test.ts` |
 | Persona consistency (relevance, rejection, prompt, quality, memory) | `tests/persona.test.ts` |
 | Editorial thresholds, duplicates, recency, tie-breaks | `tests/editorial.test.ts` |
-| Pre-publication quality gate (all checks) | `tests/quality.test.ts` |
+| Pre-publication quality gate (all checks, incl. concrete-recommendation + repetitive-framing) | `tests/quality.test.ts` |
 | Accelerated 48-hour simulation (cadence + full pipeline) | `tests/jobs.test.ts`, `tests/evaluation.test.ts` |
 | Bounded persisted state (no unbounded growth across many runs) | `tests/engine.test.ts` |
 | Scheduler health (last cron run, next due) + cron webhook auth | `tests/health.test.ts` |
@@ -210,7 +210,7 @@ Replay also proves the runner never requests an un-allowlisted URL: anything out
 - **Per-agent editorial pipeline; shared discovery pool** — discovery fetches once per source into a global `discovery_candidates` pool (canonical-URL dedup), and each agent's cycle fans the pool out into its own `discovery_decisions` rows keyed by `(agent_id, candidate_id)`. Memory, rate limits, and dedup scope are per-agent; `markDecisionPublished` refuses to publish a decision the agent doesn't own, so no agent can publish another agent's decision. Agents with different domains resolve different personas from their own config.
 - **In-memory agent session** — the dashboard's live session is in-memory; reloading re-initializes it. The durable records (posts, runs, jobs, decisions, memory) all survive restart.
 - **Legacy sim engine is test-only** — the old stage-machine simulation (`advanceAgentById`/`advanceTo` in `src/lib/agentEngine.ts`) is never advanced in production: scheduled cycles run only the real discovery → editorial → publication pipeline, and the dashboard's activity readouts are derived from persisted records (`agent_runs`, posts, decisions, fetches, `memory_entries`). Seed **demo posts** are marked `is_demo` and excluded from the judged `GET /api/agent/feed`; no other fabricated content is seeded.
-- **Local LLM provider is the default** — deterministic and offline by design; the `openai` provider is a thin `/chat/completions` client behind the same schema-validation/repair path, but hasn't been evaluated for latency/cost under load.
+- **Provider resolution is auto** — unset resolves to `openai` when `AETHRA_LLM_API_KEY` is present or `NODE_ENV=production` (no key in production → failing provider, nothing weak published); otherwise `local` (deterministic, offline). The `openai` provider is a thin `/chat/completions` client behind the same schema-validation/repair path, but hasn't been evaluated for latency/cost under load. The local provider varies openings by selecting among Ada's **approved writing patterns** and avoiding recent openings, so even offline output isn't byte-identical templates.
 - **No embeddings** — the semantic-similarity duplicate ladder is keyword/token-based behind an interface; embeddings are the documented future seam, not an implemented backend.
 - **Quality-gate hold loop** — a gate-held draft is re-generated and re-gated on each run; with the deterministic local provider this loops harmlessly (the draft never changes), but with a real LLM it becomes a genuine revision loop.
 - **Rate-limit cadence** — the routine interval (6h) and daily cap (4/24h) are editorial constants; a deployment tuning them must restart the editorial engine or make them configurable.
