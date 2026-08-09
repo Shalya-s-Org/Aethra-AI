@@ -17,6 +17,7 @@ import {
   closeDb,
   countPosts,
   getAgentRow,
+  getDb,
   getDecisionsByAgent,
   getPostsByAgent,
   getRunsByAgent
@@ -194,4 +195,38 @@ describe('durability across restarts', () => {
     assert.equal(after.status, 'idle', 'fast-forwarded run should finish after restart');
     assert.equal(countPosts(id), 1); // robot-1 published (demo seed excluded)
   });
+
+  it('keeps the persisted sim snapshot bounded across many advances (no unbounded growth)', () => {
+    // Regression: the sim snapshot is written on EVERY scheduled advance, so
+    // any display-only array that grows per run grows state_json without
+    // limit and slows every write (the 48h evaluation sim exposed this). The
+    // timeline/log/node collections are capped; once full, state stabilizes.
+    const state = initializeAgentInstance('Bounded Test', 'ai-security', undefined, {}, T0);
+    const id = state.agentId;
+
+    for (let i = 0; i < 600; i++) {
+      advanceAgentById(id, T0 + (i + 1) * 30_000, { publish: false });
+    }
+    const len1 = stateJsonLength(id);
+    for (let i = 0; i < 400; i++) {
+      advanceAgentById(id, T0 + (600 + i + 1) * 30_000, { publish: false });
+    }
+    const len2 = stateJsonLength(id);
+
+    // Hard bound: the steady-state snapshot is ~130KB. Unbounded growth would
+    // exceed this long before 1000 advances.
+    assert.ok(len1 < 250_000, `state_json too large: ${len1}`);
+    // Once the caps fill, the snapshot stops growing (deterministic: identical
+    // content). Allow a tiny tolerance instead of exact equality.
+    assert.ok(
+      Math.abs(len2 - len1) < len1 * 0.01,
+      `state_json must stabilize after the caps fill: ${len1} -> ${len2}`
+    );
+  });
 });
+
+function stateJsonLength(agentId: string): number {
+  const row = getDb().prepare('SELECT state_json FROM agents WHERE id = ?').get(agentId) as { state_json: string } | undefined;
+  assert.ok(row, 'agent row must exist');
+  return String(row.state_json).length;
+}

@@ -14,7 +14,7 @@ process.env.AETHRA_DB_PATH = path.join(TMP_DIR, 'api.db');
 import { GET as feedGET } from '../src/app/api/agent/feed/route';
 import { POST as initPOST } from '../src/app/api/agent/init/route';
 import { advanceAgentById, initializeAgentInstance } from '../src/lib/agentEngine';
-import { closeDb } from '../src/lib/db';
+import { closeDb, getDb, getPostsByAgent, getScheduledJobByAgent } from '../src/lib/db';
 import { isUlid } from '../src/lib/ids';
 
 after(() => {
@@ -231,4 +231,36 @@ describe('GET /api/agent/feed', () => {
       'feed must be reverse-chronological'
     );
   });
+
+  it('is a pure read: repeated GETs never publish, discover, schedule, or create runs', async () => {
+    const agent = initializeAgentInstance('ReadOnly Test', 'Robotics', undefined, undefined, 1_700_000_000_000);
+    const agentId = agent.agentId;
+
+    const snapshot = () => ({
+      posts: getPostsByAgent(agentId).length,
+      candidates: countRows('discovery_candidates'),
+      decisions: countRows('discovery_decisions'),
+      runs: countRowsByAgent('agent_runs', agentId),
+      job: getScheduledJobByAgent(agentId) === null ? 0 : 1
+    });
+    const before = snapshot();
+
+    for (let i = 0; i < 3; i++) {
+      const res = await feedRequest(agentId);
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), { posts: [] });
+    }
+
+    assert.deepEqual(snapshot(), before, 'GET /feed must be side-effect free (no publish/discover/schedule/runs)');
+  });
 });
+
+function countRows(table: 'discovery_candidates' | 'discovery_decisions'): number {
+  const row = getDb().prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number };
+  return Number(row.n);
+}
+
+function countRowsByAgent(table: 'agent_runs', agentId: string): number {
+  const row = getDb().prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE agent_id = ?`).get(agentId) as { n: number };
+  return Number(row.n);
+}

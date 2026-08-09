@@ -13,11 +13,13 @@ import { initializeAgentInstance } from '../src/lib/agentEngine';
 import { makeCandidate } from '../src/lib/discovery/types';
 import {
   closeDb,
+  getDb,
   getDiscoveryDecisions,
   getPostsByAgent,
   insertDiscoveryCandidate,
   upsertDiscoveryDecision
 } from '../src/lib/db';
+import { ulid } from '../src/lib/ids';
 import type { CycleRunner } from '../src/lib/jobs/queue';
 
 after(() => {
@@ -42,6 +44,47 @@ function countingCycle(counter: { runs: number; byAgent?: Record<string, number>
     }
     return { ok: true, summary: `run ${counter.runs}` };
   };
+}
+
+/** Seed a gate-passed, generated, accepted decision for an agent (the same
+ *  shape the editorial engine produces after a quality-gate pass). Returns the
+ *  candidate id; the decision id is `decision-<agent suffix>`. */
+function seedGatePassedDecision(agentId: string): string {
+  const candidate = makeCandidate({
+    title: 'Critical prompt injection vulnerability in agent framework allows remote code execution',
+    summary: 'A critical prompt injection bypass in the agent framework tool-calling layer escalates to remote code execution. Patch released. CVE-2026-99999 assigned.',
+    publishedAt: new Date(T0 - 2 * HOUR).toISOString(),
+    canonicalUrl: `https://github.com/advisories/GHSA-jobs-${agentId.slice(-4)}`,
+    sourceName: 'GitHub Security Advisories',
+    sourceType: 'github-advisory',
+    rawEvidence: JSON.stringify({ cve_id: 'CVE-2026-99999', ghsa_id: 'GHSA-jobs-1', severity: 'high' })
+  });
+  assert.ok(candidate);
+  insertDiscoveryCandidate(candidate, T0);
+
+  const post = {
+    title: candidate.title,
+    text: 'Summary. A critical prompt injection bypass in the agent framework tool-calling layer escalates to remote code execution, tracked as CVE-2026-99999. Exploitability. The disclosed details describe the attack surface. Blast radius. The affected component is exposed wherever the framework is deployed. Mitigations. The canonical advisory does not disclose a specific mitigation. Architectural implications. This finding reinforces isolating the affected component behind a trust boundary. Confidence. high confidence: this assessment is based solely on the canonical record and identifiers in the evidence.',
+    rationale: 'Selected because prompt injection in agent tool-calling is a recurring security theme. It matters now because the advisory is recent. It fits the persona mission of evidence-bound analysis. It beat the competing candidates with the highest score.',
+    confidence: 90,
+    citedUrls: [candidate.canonicalUrl],
+    relatedPosts: []
+  };
+  upsertDiscoveryDecision({
+    id: `decision-${agentId.slice(-6)}`,
+    candidateId: candidate.id,
+    decision: 'accepted',
+    totalScore: 87,
+    components: {
+      personaRelevance: 20, technicalImpact: 18, sourceQuality: 11,
+      recency: 15, novelty: 15, discussionValue: 4, evidenceConfidence: 4
+    },
+    explanation: 'ACCEPTED (87/100)',
+    decidedAtMs: T0,
+    generation: { status: 'generated', json: JSON.stringify(post) },
+    quality: { status: 'passed', json: JSON.stringify({ verdict: 'pass', score: 1, checks: [], reasons: [] }) }
+  });
+  return candidate.id;
 }
 
 describe('durable job queue: scheduling', () => {
@@ -216,44 +259,6 @@ describe('accelerated 48-hour simulation mode', () => {
 });
 
 describe('transactional gated publication', () => {
-  function seedGatePassedDecision(agentId: string): string {
-    const candidate = makeCandidate({
-      title: 'Critical prompt injection vulnerability in agent framework allows remote code execution',
-      summary: 'A critical prompt injection bypass in the agent framework tool-calling layer escalates to remote code execution. Patch released. CVE-2026-99999 assigned.',
-      publishedAt: new Date(T0 - 2 * HOUR).toISOString(),
-      canonicalUrl: `https://github.com/advisories/GHSA-jobs-${agentId.slice(-4)}`,
-      sourceName: 'GitHub Security Advisories',
-      sourceType: 'github-advisory',
-      rawEvidence: JSON.stringify({ cve_id: 'CVE-2026-99999', ghsa_id: 'GHSA-jobs-1', severity: 'high' })
-    });
-    assert.ok(candidate);
-    insertDiscoveryCandidate(candidate, T0);
-
-    const post = {
-      title: candidate.title,
-      text: 'Summary. A critical prompt injection bypass in the agent framework tool-calling layer escalates to remote code execution, tracked as CVE-2026-99999. Exploitability. The disclosed details describe the attack surface. Blast radius. The affected component is exposed wherever the framework is deployed. Mitigations. The canonical advisory does not disclose a specific mitigation. Architectural implications. This finding reinforces isolating the affected component behind a trust boundary. Confidence. high confidence: this assessment is based solely on the canonical record and identifiers in the evidence.',
-      rationale: 'Selected because prompt injection in agent tool-calling is a recurring security theme. It matters now because the advisory is recent. It fits the persona mission of evidence-bound analysis. It beat the competing candidates with the highest score.',
-      confidence: 90,
-      citedUrls: [candidate.canonicalUrl],
-      relatedPosts: []
-    };
-    upsertDiscoveryDecision({
-      id: `decision-${agentId.slice(-6)}`,
-      candidateId: candidate.id,
-      decision: 'accepted',
-      totalScore: 87,
-      components: {
-        personaRelevance: 20, technicalImpact: 18, sourceQuality: 11,
-        recency: 15, novelty: 15, discussionValue: 4, evidenceConfidence: 4
-      },
-      explanation: 'ACCEPTED (87/100)',
-      decidedAtMs: T0,
-      generation: { status: 'generated', json: JSON.stringify(post) },
-      quality: { status: 'passed', json: JSON.stringify({ verdict: 'pass', score: 1, checks: [], reasons: [] }) }
-    });
-    return candidate.id;
-  }
-
   it('publishes gate-passed decisions transactionally, once, with idempotency', () => {
     const agentId = newAgent();
     seedGatePassedDecision(agentId);
@@ -313,3 +318,113 @@ describe('transactional gated publication', () => {
     assert.equal(getPostsByAgent(agentId).length, 1);
   });
 });
+
+describe('database failure resilience', () => {
+  it('an exception inside the cycle (simulating a DB failure) is transient: the worker survives, backs off, and recovers', async () => {
+    const agentId = newAgent();
+    let now = T0;
+    let failing = true;
+    const flaky: CycleRunner = async () => {
+      if (failing) throw new Error('SQLITE_BUSY: database is locked');
+      return { ok: true, summary: 'recovered' };
+    };
+    const queue = new JobQueue({ owner: 'A', now: () => now, backoffMs: 1000, cycle: flaky });
+    queue.scheduleAgent(agentId, 30 * MIN, 0);
+
+    // The thrown error is caught by the queue, recorded as a transient failure
+    // (never terminal, never a crash), and the occurrence is backed off.
+    const first = await queue.processDueJobs();
+    assert.equal(first.completed, 0);
+    assert.equal(first.terminal, 0);
+    const job = queue.getJob(agentId)!;
+    assert.equal(job.attempts, 1);
+    assert.match(job.lastError ?? '', /SQLITE_BUSY/);
+    assert.equal(job.nextRunAtMs, now + 1000, 'transient failures must back off');
+
+    // Once the store recovers, the same occurrence completes and attempts reset.
+    now = job.nextRunAtMs;
+    failing = false;
+    const second = await queue.processDueJobs();
+    assert.equal(second.completed, 1);
+    assert.equal(queue.getJob(agentId)!.attempts, 0);
+  });
+
+  it('a constraint failure during publication rolls back atomically and is retried (no partial rows, no duplicates)', async () => {
+    const agentId = newAgent();
+    seedGatePassedDecision(agentId);
+    const decisionId = `decision-${agentId.slice(-6)}`;
+
+    // Simulate a delivery race: a prior occurrence inserted the post with the
+    // same idempotency key but crashed before marking the decision published.
+    getDb()
+      .prepare(
+        `INSERT INTO posts (id, agent_id, title, body, rationale, published_at, idempotency_key)
+         VALUES (?, ?, 'x', 'y', 'z', ?, ?)`
+      )
+      .run(ulid(), agentId, new Date(T0).toISOString(), `decision:${decisionId}`);
+
+    // Baseline: init itself seeds one demo topic row — capture counts so the
+    // rollback assertion compares like with like.
+    const topicsBefore = countRows('topics', agentId);
+    const sourcesBefore = countRows('sources', agentId);
+
+    let now = T0;
+    let first = true;
+    const queue = new JobQueue({
+      owner: 'A',
+      now: () => now,
+      backoffMs: 1000,
+      cycle: async (id, at) => {
+        // Publication only (no sim advance / discovery / editorial): this test
+        // isolates the transactional publication step's atomicity.
+        if (first) {
+          first = false;
+          publishPublishablePosts(id, at);
+          return { ok: true, summary: 'unreachable' };
+        }
+        publishPublishablePosts(id, at);
+        return { ok: true, summary: 'recovered' };
+      }
+    });
+    queue.scheduleAgent(agentId, 30 * MIN, 0);
+
+    const tick = await queue.processDueJobs();
+    assert.equal(tick.completed, 0);
+    assert.equal(tick.terminal, 0);
+    const job = queue.getJob(agentId)!;
+    assert.match(job.lastError ?? '', /UNIQUE|constraint/i);
+
+    // Atomic rollback: exactly the pre-existing post remains — the topic and
+    // source inserts rolled back with the failed post, and the decision is
+    // still unpublished (a re-delivered occurrence can publish it later).
+    assert.equal(getPostsByAgent(agentId).length, 1, 'no duplicate post may exist');
+    assert.equal(
+      countRows('topics', agentId),
+      topicsBefore,
+      'topic insert must roll back with the failed post'
+    );
+    assert.equal(
+      countRows('sources', agentId),
+      sourcesBefore,
+      'source insert must roll back with the failed post'
+    );
+    const row = getDiscoveryDecisions({ limit: 10 }).find(r => r.id === decisionId);
+    assert.equal(row?.publishedPostId, null, 'decision must stay unpublished after a rolled-back publish');
+
+    // Recovery: remove the conflicting row; the next occurrence publishes once.
+    getDb().prepare(`DELETE FROM posts WHERE idempotency_key = ?`).run(`decision:${decisionId}`);
+    now += 1000;
+    const second = await queue.processDueJobs();
+    assert.equal(second.completed, 1);
+    assert.equal(getPostsByAgent(agentId).length, 1);
+    assert.ok(
+      getDiscoveryDecisions({ limit: 10 }).find(r => r.id === decisionId)?.publishedPostId,
+      'the decision marker is set once the post actually commits'
+    );
+  });
+});
+
+function countRows(table: 'topics' | 'sources', agentId: string): number {
+  const row = getDb().prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE agent_id = ?`).get(agentId) as { n: number };
+  return Number(row.n);
+}

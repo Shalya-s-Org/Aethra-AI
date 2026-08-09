@@ -141,6 +141,24 @@ const focusForStage = (status: AgentStatus, topic: { title: string }, domain: st
 const canonicalUrlsOf = (topic: { sources: string[] }): string[] =>
   topic.sources.map(canonicalizeSourceUrl).filter((u): u is string => u !== null);
 
+// The sim snapshot is persisted on every advance (each scheduled run), so any
+// array that grows per run grows state_json without bound and slows every
+// write. Keep the display-only collections bounded; the durable records live
+// in tables (posts, topics, memory_entries, agent_runs).
+const MAX_TIMELINE_LOGS = 200;
+const MAX_REJECTED_LIST = 100;
+const MAX_MEMORY_NODES = 200;
+
+function pushCapped<T>(arr: T[], item: T, max: number): void {
+  arr.push(item);
+  if (arr.length > max) arr.splice(0, arr.length - max);
+}
+
+function unshiftCapped<T>(arr: T[], item: T, max: number): void {
+  arr.unshift(item);
+  if (arr.length > max) arr.pop();
+}
+
 // ---- State transitions (each fires exactly once per run) ----
 
 // Enter the stage at run.stageIndex: set status/details/focus and fire the
@@ -158,19 +176,19 @@ function enterStage(state: BackendAgentInstance, run: PipelineRun, now: number):
   const timeStr = formatClockTime(new Date(now));
 
   if (stage.status === 'scanning') {
-    state.autonomousTimelineLogs.push({ timestamp: timeStr, message: `Discovered topic: ${topic.title.slice(0, 38)}...` });
+    pushCapped(state.autonomousTimelineLogs, { timestamp: timeStr, message: `Discovered topic: ${topic.title.slice(0, 38)}...` }, MAX_TIMELINE_LOGS);
   } else if (stage.status === 'filtering' && topic.recommendation === 'Reject') {
-    state.autonomousTimelineLogs.push({ timestamp: timeStr, message: `Rejected: ${topic.title.slice(0, 30)}... (Outside standard)` });
+    pushCapped(state.autonomousTimelineLogs, { timestamp: timeStr, message: `Rejected: ${topic.title.slice(0, 30)}... (Outside standard)` }, MAX_TIMELINE_LOGS);
     state.pipelineStats.filterCount += 1;
-    state.rejectedTodayList.unshift({ title: topic.title, reason: topic.rejectionReason || "Low engineering relevance" });
+    unshiftCapped(state.rejectedTodayList, { title: topic.title, reason: topic.rejectionReason || "Low engineering relevance" }, MAX_REJECTED_LIST);
   } else if (stage.status === 'reasoning') {
     state.pipelineStats.reasonCount += 1;
-    state.autonomousTimelineLogs.push({ timestamp: timeStr, message: `Scored credibility of ${topic.title.slice(0, 20)}...: 97%` });
+    pushCapped(state.autonomousTimelineLogs, { timestamp: timeStr, message: `Scored credibility of ${topic.title.slice(0, 20)}...: 97%` }, MAX_TIMELINE_LOGS);
   } else if (stage.status === 'publishing' && topic.recommendation === 'Accept') {
     state.pipelineStats.publishCount += 1;
-    state.autonomousTimelineLogs.push({ timestamp: timeStr, message: `Published post: ${topic.title.slice(0, 35)}...` });
+    pushCapped(state.autonomousTimelineLogs, { timestamp: timeStr, message: `Published post: ${topic.title.slice(0, 35)}...` }, MAX_TIMELINE_LOGS);
   } else if (stage.status === 'learning') {
-    state.autonomousTimelineLogs.push({ timestamp: timeStr, message: "Synthesized graph relationships & updated index nodes." });
+    pushCapped(state.autonomousTimelineLogs, { timestamp: timeStr, message: "Synthesized graph relationships & updated index nodes." }, MAX_TIMELINE_LOGS);
   }
 }
 
@@ -263,7 +281,7 @@ function finishRun(
   state.currentActionDetails = `Observe Ecosystem: Scanning stream registries. Next scan in ${cadence}s.`;
   state.novaLiveFocus = defaultFocus(state.config.domain);
 
-  state.decisions.unshift(topic);
+  unshiftCapped(state.decisions, topic, 100);
 
   const decision: 'accept' | 'reject' = topic.recommendation === 'Accept' ? 'accept' : 'reject';
   if (!hasDecision(state.agentId, topicId)) {
@@ -363,7 +381,7 @@ function finishRun(
           newPost.relatedPosts = links.slice(0, 5).map(l => l.title);
         }
 
-        state.posts.unshift(newPost);
+        unshiftCapped(state.posts, newPost, 50);
         state.pipelineStats.writeCount += 1;
         outcome = 'published';
 
@@ -386,7 +404,8 @@ function finishRun(
           connections: [nodeTopicId],
           timestamp: new Date(now).toISOString()
         };
-        state.memoryNodes.push(topicNode, opinionNode);
+        pushCapped(state.memoryNodes, topicNode, MAX_MEMORY_NODES);
+        pushCapped(state.memoryNodes, opinionNode, MAX_MEMORY_NODES);
         insertMemoryNode({ id: nodeTopicId, agentId: state.agentId, nodeLabel: topicNode.label, nodeGroup: 'topic', details: topicNode.details, connections: topicNode.connections, createdAtMs: now });
         insertMemoryNode({ id: nodeOpinionId, agentId: state.agentId, nodeLabel: opinionNode.label, nodeGroup: 'opinion', details: opinionNode.details, connections: opinionNode.connections, createdAtMs: now });
       } catch {

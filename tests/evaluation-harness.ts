@@ -12,6 +12,12 @@
 // detector, routine interval, daily cap, and quality gate all see realistic,
 // reproducible input. Production behavior is untouched: acceleration only
 // compresses schedule intervals (timeFactor) inside the queue.
+//
+// Sizing: the production cadence is 6h (the routine posting interval), so a
+// 48h horizon is 8 routine slots; with timeFactor 6 the effective interval is
+// 1h → 48 recurring occurrences. That is enough to exercise the 6h interval,
+// the 24h rolling cap (the 5th slot is held and pushed out), and duplicate
+// rejection across occurrences, while keeping the test at ~2s.
 
 import { makeCandidate } from '../src/lib/discovery/types';
 import { insertDiscoveryCandidate } from '../src/lib/db';
@@ -142,17 +148,17 @@ export interface EvaluationSimResult {
  *  the queue never loops in production either; each tick is an external cron
  *  delivery. */
 export async function runEvaluationSim(opts: EvaluationSimOptions): Promise<EvaluationSimResult> {
-  const { agentId, startMs, scheduleMs, horizonMs, timeFactor = 60 } = opts;
+  const { agentId, startMs, scheduleMs, horizonMs, timeFactor = 6 } = opts;
   let now = startMs;
+  const intervalMs = Math.max(1, Math.round(scheduleMs / timeFactor));
   const queue = new JobQueue({
     now: () => now,
     timeFactor,
     cycle: async (id: string, at: number) =>
-      runAgentCycle(id, at, { discovery: makeFixtureDiscovery({ startMs, intervalMs: queue.effectiveScheduleMs(scheduleMs) }) })
+      runAgentCycle(id, at, { discovery: makeFixtureDiscovery({ startMs, intervalMs }) })
   });
   queue.scheduleAgent(agentId, scheduleMs, 0);
 
-  const intervalMs = queue.effectiveScheduleMs(scheduleMs);
   const steps = Math.floor(horizonMs / intervalMs);
   const summaries: EvaluationSimResult['summaries'] = [];
   for (let i = 0; i < steps; i++) {
